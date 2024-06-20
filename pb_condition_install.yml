@@ -1,0 +1,25 @@
+- hosts: webservercombined
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.package:
+        update_cache: true
+
+- hosts: webservercombined
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: variable playbook test install apache
+      apt:
+        name: apache2
+        state: latest 
+      when: ansible_distribution == 'Debian' or
+            ansible_distribution == 'Ubuntu'
+    - name: install httpd
+      yum:
+        name: httpd
+        state: latest
+      when: ansible_distribution == 'RedHat'        
