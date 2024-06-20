@@ -1,0 +1,24 @@
+- hosts: webserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.package:
+        update_cache: true
+
+- hosts: webserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: latest Apache version installed
+      yum:
+        name: httpd
+        state: latest
+    - name: Apache enabled and running
+      service:
+        name: httpd
+        enabled: true
+        state: started
+    

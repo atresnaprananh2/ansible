@@ -1,0 +1,39 @@
+- hosts: all
+  remote_user: user
+  become: true
+  tasks:
+    - name: update apt cache
+      apt:
+        update_cache: yes
+- hosts: webserver
+  remote_user: user
+  become: true
+  tasks:
+    - name: install nginx and php
+      apt:
+        pkg:
+        - nginx
+        - php-fpm
+        - php-common
+- hosts: dbserver
+  remote_user: user
+  become: true
+  tasks:
+    - name: Install MariaDB
+      apt:
+        name: ['mariadb-server', 'python3-mysqldb']
+    - name: create database db_app
+      mysql_db:
+        name: db_app
+        state: present
+    - name: create user and access rights
+      mysql_user:
+        name: user_app
+        password: test
+        priv: 'db_app.*:ALL'
+        state: present
+    - name: create root password mariadb
+      mysql_user:
+        name: root
+        password: test
+        state: present

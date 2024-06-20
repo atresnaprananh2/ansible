@@ -1,0 +1,23 @@
+- hosts: dbserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: Install MariaDB
+      apt:
+        name: ['mariadb-server', 'python3-mysqldb']
+    - name: create database db_app
+      mysql_db:
+        name: db_app
+        state: present
+    - name: create user and access rights
+      mysql_user:
+        name: user_app
+        password: test
+        priv: 'db_app.*:ALL'
+        state: present
+    - name: create root password mariadb
+      mysql_user:
+        name: root
+        password: test
+        state: present

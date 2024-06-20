@@ -1,0 +1,8 @@
+- hosts: dbserver2
+  become: true
+  become_method: sudo
+  remote_user: user
+  become_user: user
+  tasks:
+    - name: test
+      command: touch /home/user/test.txt

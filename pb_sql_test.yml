@@ -1,0 +1,12 @@
+- hosts: dbserver
+  remote_user: user
+  become: true
+  vars:
+   mysql_root_password: test
+  tasks:
+    - name: add sample query to server
+      copy:
+        src: testquery.sql
+        dest: /tmp/testquery.sql
+    - name: run script
+      mysql_db: name=db_app state=import target=/tmp/testquery.sql login_user=root login_password=test
