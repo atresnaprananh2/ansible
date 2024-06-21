@@ -1,0 +1,17 @@
+- hosts: webserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: copy httpd.conf
+      copy:
+        src: httpd.conf
+        dest: /etc/httpd/conf/
+      notify:
+        - restart_apache
+  handlers:
+    - name: restart_apache
+      service:
+        name: httpd
+        state: restarted
+    
