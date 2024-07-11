@@ -1,0 +1,14 @@
+- hosts: all
+  remote_user: user
+  become: true
+  become_method: sudo
+  tasks:
+    - name: Ensure users
+      user:
+        name: "{{item}}"
+        state: present
+      loop:
+        - user
+        - qa_user
+        - prod_user
+        - root

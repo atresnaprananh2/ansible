@@ -1,0 +1,15 @@
+- hosts: oracle19
+  remote_user: oracle
+  become: true
+  become_method: sudo
+  name: checkrunningdb
+  tasks:
+  - name: run python script locally (Using connection local)
+    ansible.builtin.script:
+      cmd: ~/ansible/pyscripts/checkcxoracle.py
+      executable: /usr/bin/python3
+    register: result
+    ignore_errors: True
+  
+  - ansible.builtin.debug:
+      msg: "{{ result.failed }}"  

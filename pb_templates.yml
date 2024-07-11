@@ -1,0 +1,13 @@
+- hosts: webserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  name: Ensure Apache is installed and started
+  vars:
+    http_port: 80
+    http_docroot: /var/www/mysite.com
+  tasks: 
+    - name: verify correct config file is present
+      template: 
+        src: templates/httpd.conf.j2
+        dest: /etc/httpd/conf/httpd.conf

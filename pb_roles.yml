@@ -1,0 +1,14 @@
+- hosts: webserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  name: use apache vhost role playbook
+  pre_tasks: 
+    - debug: 
+        msg: 'beginning  web server configuration'
+  roles:
+    - apache_vhost
+  post_tasks:
+    - debug:
+        msg: 'web server has been configurated'
+     

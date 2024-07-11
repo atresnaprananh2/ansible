@@ -1,0 +1,14 @@
+- hosts: oracle19
+  remote_user: oracle
+  become: true
+  become_method: sudo
+  name: checkrunningdb
+  vars:
+      oracle_home: /u01/app/oracle/product/19.3.0/dbhome_1
+      service_name: orcl
+  tasks:
+    - name: Check if database is running
+      shell: "{{ oracle_home }}/bin/srvctl status database -d {{ service_name }}"
+      environment: oracle_env
+      register: check_db_up
+      tags: check

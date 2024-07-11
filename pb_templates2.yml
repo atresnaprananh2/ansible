@@ -1,0 +1,15 @@
+- hosts: webserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+  name: basic system setup
+  tasks: 
+    - name: Update MOTD from Jinja2 Template
+      template: 
+        src: templates/motd.j2
+        dest: /etc/motd
+  handlers:
+    - name: reload firewall
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded

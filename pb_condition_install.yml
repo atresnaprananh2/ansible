@@ -1,3 +1,5 @@
+#task to restart httpd package if there is any update
+
 - hosts: webservercombined
   remote_user: user
   become: true

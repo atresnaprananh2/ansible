@@ -1,14 +1,21 @@
-- hosts: all
-  remote_user: user
+- hosts: oracle19
+  remote_user: oracle
   become: true
   become_method: sudo
+  name: Oracle Patch
   tasks:
-    - name: Ensure users
-      user:
-        name: "{{item}}"
+    - name: Ensure files
+      copy:
+        src: /home/user/AnsibleOraclePatch/files/{{item}}
+        dest: /home/oracle/Patching/{{item}}
         state: present
       loop:
-        - user
-        - qa_user
-        - prod_user
-        - root
+        - 'gen_freeze_db.sh'
+        - 'gen_list_invalid_objects.sh'
+        - 'gen_list_utl_privs.sh'
+        - 'gen_run_utlrp.sh'
+        - 'gen_shutdown_db.sh'
+        - 'invalid_objects_after.sql'
+        - 'invalid_objects_before.sql'
+        - 'utl_privs_after.sql'
+        - 'utl_privs_before.sql'
