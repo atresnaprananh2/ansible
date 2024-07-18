@@ -1,4 +1,4 @@
-- hosts: localhost
+- hosts: 172.19.0.46
   vars:
     my_mood: happy
   tasks:

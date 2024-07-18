@@ -1,0 +1,17 @@
+---
+- hosts: dbserver2
+  remote_user: user
+  become: true
+  become_method: sudo
+ 
+  tasks:
+  
+    - name: Get current user on remote
+      ansible.builtin.shell: |
+          whoami
+      become: true
+      register: out 
+       - debug:
+           msg: "{{ out }}"
+   
+   

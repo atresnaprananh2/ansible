@@ -1,0 +1,42 @@
+- hosts: oracle12
+  gather_facts: true
+  become: true
+  become_user: oracle
+  remote_user: oracle
+  become_method: su
+  vars:
+    - oracle_binary_version: 12.2.0
+    - oracle_home_path: /home/oracle/app/oracle/product/{{ oracle_binary_version }}/dbhome_1
+    - directory: /home
+  environment:
+    ORACLE_HOME: '{{ oracle_home_path }}'
+    PATH: '{{ oracle_home_path }}/OPatch:/opt/ora/app/oracle:.:/bin:/usr/ccs/bin:/usr/bin:/usr/sbin:/usr/ucb:/usr/openwin/bin:/usr/local/bin:/opt/ora/app/oracle/lbin:/opt/ora/app/oracle/product/{{ oracle_binary_version }}/bin:/opt/ora/app/oracle/product/{{ oracle_binary_version }}/bin:/usr/local/bin/perl:/home/ORADBA/local_bin:/usr/local/sbin'
+    ORACLE_BASE: '/opt/ora/app/oracle'
+    LD_LIBRARY_PATH: '/usr/lib:/opt/ora/app/oracle/product/{{ oracle_binary_version }}/lib:/usr/dt/lib:/usr/ucblib'
+    ORAENV_ASK: 'NO'
+    HOME: /home/oracle
+  
+  tasks:
+    # - name: "oracle home"
+    #   command: "echo $ORACLE_HOME"
+    #   register: chkorcl
+    # - debug:
+    #     msg: "{{ chkorcl }}"
+    # - name: Check for ~/.blah/config
+    #   delegate_to: localhost
+    #   stat:
+    #     path: /home/user/ansible
+    #   register: stat_blah_config
+    # - debug:
+    #     msg: "{{ stat_blah_config }}"  
+    # - name: chk2
+    #   delegate_to: localhost
+    #   command: "ls {{directory}}"
+    #   register: dir_out
+    # - debug: var={{item}}
+    #   with_items: dir_out.stdout_lines
+    - name: Download something to Ansible Controller
+      get_url:
+        url: "http://172.19.2.98/scripts/installpexpect.sh"
+        dest: "/home/oracle"
+      tags: download,remote

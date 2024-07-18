@@ -1,0 +1,57 @@
+  - hosts: all
+    gather_facts: true
+    
+    vars:
+      - binary_specific_oracle_sid: "orcl"
+      - ansible_python_interpreter: /opt/opsware/agent/bin/./python3
+      - oracle_binary_version: 12.2.0
+      - oracle_home_path: /home/oracle/app/oracle/product/{{ oracle_binary_version }}/dbhome_1
+      - oracle_prep_patch_dir: /home/oracle/Patching
+      - ansible_patches_dir: /home/oracle/Ansible
+      - oracle_script_prep: /home/oracle/Ansible
+      - opatch_latest_zip_src: http://172.19.2.98/patches/p6880880_122010_Linux-x86-64.zip
+      - oneoff_latest_zip_src: http://172.19.2.98/patches/p30463660_122010_Linux-x86-64.zip
+      - pexpectinstaller: http://172.19.2.98/patches/pexpect-3.3.tar.gz
+      - script_url: http://172.19.2.98/scripts/
+      - opatch_latest_zip: p6880880_122010_Linux-x86-64.zip
+      - oneoff_latest_zip: p30463660_122010_Linux-x86-64.zip
+      - patchcode: 30502018
+      - oracle_binary_version_int: '{{ oracle_binary_version | replace(".", "") }}'
+      - opatch_version_int: '{{ opatch_version | replace(".", "") }}'
+      - oneoff_patch_dir: p30463660
+      - oneoff_patch_dir_int: '{{ oneoff_patch_dir | replace("p", "", 1) }}'
+      - listener_file_path: '{{ oracle_script_prep }}/listenerOutput'
+      - listenername: LISTENER
+
+    environment:
+      ORACLE_HOME: '{{ oracle_home_path }}'
+      PATH: '{{ oracle_home_path }}/OPatch:/opt/ora/app/oracle:.:/bin:/usr/ccs/bin:/usr/bin:/usr/sbin:/usr/ucb:/usr/openwin/bin:/usr/local/bin:/opt/ora/app/oracle/lbin:/opt/ora/app/oracle/product/{{ oracle_binary_version }}/bin:/opt/ora/app/oracle/product/{{ oracle_binary_version }}/bin:/usr/local/bin/perl:/home/ORADBA/local_bin:/usr/local/sbin'
+      ORACLE_BASE: '/opt/ora/app/oracle'
+      LD_LIBRARY_PATH: '/usr/lib:/opt/ora/app/oracle/product/{{ oracle_binary_version }}/lib:/usr/dt/lib:/usr/ucblib'
+      ORAENV_ASK: 'NO'
+      HOME: /home/oracle
+    
+    tasks:
+     
+      - name: "Step 37 --- Verify all patches have been applied successfully"
+        ansible.builtin.expect:
+          command:  sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+          chdir: '{{ oracle_home_path }}/OPatch'
+          responses:
+            (?i)proceed: 'y'
+        #when: pexpect|succeeded
+        tags:
+          - patching
+      - name: "Step 38 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
+        command: '{{ oracle_home_path }}/bin/lsnrctl start {{ listenername }}'
+        #when: "oracle_binary_version | splitVersion == '12'"
+        tags:
+          - patching
+
+      - name: "Step 39 --- Start the databases"
+        command: sh '{{ oracle_script_prep }}/startDatabase.sh'
+        args:
+          chdir: '{{ oracle_script_prep }}'
+        tags:
+          - patching
+      
