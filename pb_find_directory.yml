@@ -1,0 +1,21 @@
+- hosts: postgre
+  remote_user: root
+  become: true
+  become_user: root
+  name: Postgre patch
+  vars:
+    ver: 16
+    minorver: 2
+    oldver: 16
+  tasks:
+    - name: Find psql binary location
+      shell: "which psql || find /usr /usr/local -type f -name psql"
+      register: psql_path
+
+    - name: Extract bin directory path
+      set_fact:
+        postgres_bin_dir: "{{ psql_path.stdout | dirname }}"
+      
+    - name: Print PostgreSQL bin directory
+      debug:
+        var: postgres_bin_dir

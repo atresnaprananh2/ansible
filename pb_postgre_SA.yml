@@ -1,21 +1,34 @@
 - hosts: all
-  
   name: Postgre patch
   vars:
     ver: 16
-    minorver: 0
+    minorver: 2
     oldver: 15
+    postgredir: /var/lib/
   tasks:
+    - name: get dir
+      command: sudo -u postgres pg_config --bindir
+      register: postgrebinold
+      ignore_errors: true
+      args:
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
+
+    
     - name: Run pg_dumpall
-      shell: sudo -u postgres pg_dumpall > /var/lib/pgsql/backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
+      shell: sudo -u postgres pg_dumpall > {{ postgredir }}pgsql/backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
       register: chk1
       args:
-        chdir: '/var/lib/pgsql'
-    
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
+
+
     - name: chk backup
       debug:
         msg:
           - "{{ chk1.stdout }}"
+      when: ver != oldver
+
 
     - name: download patch data
       command: wget https://ftp.postgresql.org/pub/source/v{{ ver }}.{{ minorver }}/postgresql-{{ ver }}.{{ minorver }}.tar.gz
@@ -28,7 +41,7 @@
       command: sudo yum install gcc readline-devel zlib-devel -y
 
     - name: configure installer
-      shell: ./configure --prefix=/var/lib/pgsql/{{ ver }} --without-icu
+      shell: ./configure --prefix={{ postgredir }}pgsql/{{ ver }} --without-icu
       register: chk2
       args:
         chdir: '/root/postgresql-{{ ver }}.{{ minorver }}'
@@ -52,68 +65,64 @@
 
     - name: Create Data directory
       file:
-        path: /var/lib/pgsql/{{ ver }}/data
+        path: "{{ postgredir }}pgsql/{{ ver }}/data"
         state: directory
         owner: postgres
         mode: 0755
+      when: ver != oldver
 
     - name: Stop old svc 
-      shell: sudo -u postgres pg_ctl stop -D /var/lib/pgsql/{{ oldver }}/data
+      shell: sudo -u postgres pg_ctl stop -D {{ postgredir }}pgsql/{{ oldver }}/data
       register: chk3
       args:
-        chdir: '/var/lib/pgsql' 
+        chdir: '{{ postgredir }}pgsql' 
 
     - name: Init new db  
-      shell: sudo -u postgres /var/lib/pgsql/{{ ver }}/bin/initdb -D /var/lib/pgsql/{{ ver }}/data
+      shell: sudo -u postgres {{ postgredir }}pgsql/{{ ver }}/bin/initdb -D {{ postgredir }}pgsql/{{ ver }}/data
       register: chk4
       args:
-        chdir: '/var/lib/pgsql' 
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
+ 
 
     - name: run pg_upgrade  
-      shell: sudo -u postgres /var/lib/pgsql/{{ ver }}/bin/pg_upgrade -b /usr/pgsql-{{ oldver }}/bin -B /var/lib/pgsql/{{ ver }}/bin -d /var/lib/pgsql/{{ oldver }}/data -D /var/lib/pgsql/{{ ver }}/data
+      shell: sudo -u postgres {{ postgredir }}pgsql/{{ ver }}/bin/pg_upgrade -b {{ postgrebinold.stdout }} -B {{ postgredir }}pgsql/{{ ver }}/bin -d {{ postgredir }}pgsql/{{ oldver }}/data -D {{ postgredir }}pgsql/{{ ver }}/data
       register: chk6
       args:
-        chdir: '/var/lib/pgsql' 
-
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
+ 
     - name: start new db   
-      shell: sudo -u postgres /var/lib/pgsql/{{ ver }}/bin/pg_ctl  -D /var/lib/pgsql/{{ ver }}/data start
+      shell: sudo -u postgres {{ postgredir }}pgsql/{{ ver }}/bin/pg_ctl  -D {{ postgredir }}pgsql/{{ ver }}/data start
       register: chk7
       args:
-        chdir: '/var/lib/pgsql' 
+        chdir: '{{ postgredir }}pgsql' 
 
     - name: vacuum DB    
-      shell: sudo -u postgres /var/lib/pgsql/{{ ver }}/bin/vacuumdb -U postgres --all --analyze-in-stages 
+      shell: sudo -u postgres {{ postgredir }}pgsql/{{ ver }}/bin/vacuumdb -U postgres --all --analyze-in-stages 
       register: chk8
       args:
-        chdir: '/var/lib/pgsql'
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
+
     - name: chk vacuum
       debug:
         msg:
-          - "{{ chk8.stdout }}" 
+          - "{{ chk8.stdout }}"
+      when: ver != oldver
+ 
 
     - name: change path     
-      shell: export PATH=/var/lib/pgsql/{{ ver }}/bin:$PATH
+      shell: export PATH={{ postgredir }}pgsql/{{ ver }}/bin:$PATH
       args:
-        chdir: '/var/lib/pgsql' 
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
+ 
 
-    - name: set commands  1    
-      shell: sudo ln -s /var/lib/pgsql/{{ ver }}/bin/pg_dumpall /usr/bin/pg_dumpall --force
+    - name: set command links
+      shell: sudo ln -s {{ postgredir }}pgsql/{{ ver }}/bin/* /usr/bin/ --force
       args:
-        chdir: '/var/lib/pgsql' 
+        chdir: '{{ postgredir }}pgsql'
+      when: ver != oldver
 
-    - name: set commands  2    
-      shell: sudo ln -s /var/lib/pgsql/{{ ver }}/bin/pg_dump /usr/bin/pg_dump --force
-      args:
-        chdir: '/var/lib/pgsql'
-    - name: set commands  3    
-      shell: sudo ln -s /var/lib/pgsql/{{ ver }}/bin/pg_ctl /usr/bin/pg_ctl --force
-      args:
-        chdir: '/var/lib/pgsql'
-    - name: set commands  4    
-      shell: sudo ln -s /var/lib/pgsql/{{ ver }}/bin/psql /usr/bin/psql --force
-      args:
-        chdir: '/var/lib/pgsql'
-    - name: set commands  5    
-      shell: sudo ln -s /var/lib/pgsql/{{ ver }}/bin/pg_upgrade /usr/bin/pg_upgrade --force
-      args:
-        chdir: '/var/lib/pgsql'
+   
