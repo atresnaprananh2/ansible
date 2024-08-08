@@ -1,0 +1,49 @@
+---
+- name: Upgrade PostgreSQL from 15 to 16
+  hosts: windows
+  tasks:
+    - name: Stop PostgreSQL 15 service
+      win_service:
+        name: postgresql-x64-15
+        state: stopped
+
+    - name: Backup PostgreSQL data directory
+      win_command: >
+        powershell -command "Copy-Item -Path 'C:\Program Files\PostgreSQL\15\data' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+
+    - name: Download PostgreSQL 16 installer
+      win_get_url:
+        url: https://get.enterprisedb.com/postgresql/postgresql-16.0-windows-x64.exe
+        dest: C:\postgresql-16.0-windows-x64.exe
+
+    - name: Install PostgreSQL 16
+      win_command: >
+        powershell -command "Start-Process -FilePath 'C:\postgresql-16.0-windows-x64.exe' -ArgumentList '/SILENT' -Wait"
+
+    - name: Initialize PostgreSQL 16 data directory
+      win_command: >
+        "C:\Program Files\PostgreSQL\16\bin\initdb.exe -D 'C:\Program Files\PostgreSQL\16\data'"
+
+    - name: Stop PostgreSQL 16 service
+      win_service:
+        name: postgresql-x64-16
+        state: stopped
+
+    - name: Migrate data from PostgreSQL 15 to 16
+      win_command: >
+        "C:\Program Files\PostgreSQL\16\bin\pg_upgrade.exe -b 'C:\Program Files\PostgreSQL\15\bin' -B 'C:\Program Files\PostgreSQL\16\bin' -d 'C:\Program Files\PostgreSQL\15\data' -D 'C:\Program Files\PostgreSQL\16\data'"
+
+    - name: Start PostgreSQL 16 service
+      win_service:
+        name: postgresql-x64-16
+        state: started
+
+    - name: Remove PostgreSQL 15
+      win_package:
+        name: PostgreSQL 15
+        state: absent
+
+    - name: Remove PostgreSQL 16 installer
+      win_file:
+        path: C:\postgresql-16.0-windows-x64.exe
+        state: absent

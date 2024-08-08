@@ -1,0 +1,109 @@
+- hosts: win
+  vars:
+    ver: 16
+    minorver: 2
+    oldver: 15
+    postgredir: /var/lib/
+    my_mood: happy
+    urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259105
+  tasks:
+   
+    - name: Stop PostgreSQL 15 service
+      win_service:
+        name: postgresql-x64-15
+        state: stopped
+
+    - name: Backup PostgreSQL data directory
+      win_command: >
+        powershell -command "Copy-Item -Path 'C:\Program Files\PostgreSQL\15\data' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+
+    - name: Download PostgreSQL 16 installer
+      win_get_url:
+        url: "{{ urlpatch }}"
+        dest: C:\postgresql-16.3-windows-x64.exe
+    
+  
+    # - name: Install PostgreSQL silently
+    #   ansible.windows.win_package:
+    #     path: C:\postgresql-16.3-windows-x64.exe
+    #     creates_path: C:\Program Files\PostgreSQL\16\
+    #     state: present
+    #     arguments: /S
+    # - name: Ensure required Visual C++ Redistributable is installed
+    #   win_chocolatey:
+    #     name: vcredist140
+    #     state: present
+
+    # - name: Install PostgreSQL silently
+    #   win_shell: C:\postgresql-16.3-windows-x64.exe --mode unattended --unattendedmodeui none --superpassword "P@ssw0rdnh2" --servicename "postgresql" --serviceaccount "NT AUTHORITY\NetworkService"
+    #   args:
+    #     executable: cmd
+    #   register: install_output
+    # - name: Ensure installation directories are clean
+    #   ansible.windows.win_command:
+    #     _raw_params: 'powershell.exe -Command "Remove-Item -Path ''C:\Program Files\PostgreSQL\16'' -Recurse -Force"'
+    #   failed_when: false  # This allows the playbook to continue even if the directory doesn't exist
+    #   ignore_errors: yes
+    
+    # - name: Install PostgreSQL 16
+    #   ansible.windows.win_command:
+    #     _raw_params: ' C:\postgresql-16.3-windows-x64.exe --unattendedmodeui minimal --mode unattended --superpassword P@ssw0rdnh2'
+    #   register: install_result
+    #   failed_when: "'Problem running post-install step' in install_result.stdout"
+    #   ignore_errors: true
+
+    # - name: Print install output
+    #   debug:
+    #     var: install_result
+
+    # - name: Install PostgreSQL 16
+    #   ansible.windows.win_command:
+    #     _raw_params: 'C:\postgresql-16.3-windows-x64.exe --unattendedmodeui minimal --mode unattended --superpassword P@ssw0rdnh2'
+    #   register: install_output
+
+    # - name: Print install output
+    #   debug:
+    #     var: install_output
+
+    # - name: Install PostgreSQL 16
+    #   win_command: >
+    #     powershell -command "Start-Process -FilePath 'C:\postgresql-16.3-windows-x64.exe' -ArgumentList '/SILENT' -Wait"
+
+    # - name: Initialize PostgreSQL 16 data directory
+    #   win_command: 'cmd /c ""%PROGRAMFILES%\PostgreSQL\16\bin\initdb.exe" -D "C:\Program Files\PostgreSQL\16\data""'
+     
+    # - name: Stop PostgreSQL 16 service
+    #   win_service:
+    #     name: postgresql-x64-16
+    #     state: stopped
+      
+  
+    # - name: Migrate data from PostgreSQL 15 to 16 
+    #   win_command: 'cmd /c ""%PROGRAMFILES%\PostgreSQL\16\bin\pg_upgrade.exe" -b "C:\Program Files\PostgreSQL\15\bin" -B "C:\Program Files\PostgreSQL\16\bin" -d "C:\Program Files\PostgreSQL\15\data" -D "C:\Program Files\PostgreSQL\16\data""'
+     
+
+    # - name: Start PostgreSQL 16 service
+    #   win_service:
+    #     name: postgresql-x64-16
+    #     state: started
+
+    # - name: Remove PostgreSQL 15
+    #   win_package:
+    #     name: PostgreSQL 15
+    #     state: absent
+
+    # - name: Remove PostgreSQL 16 installer
+    #   win_file:
+    #     path: C:\postgresql-16.3-windows-x64.exe
+    #     state: absent
+
+    # - name: Get PostgreSQL version
+    #   win_command: 'cmd /c ""%PROGRAMFILES%\PostgreSQL\15\bin\psql.exe" -V"'
+    #   register: psql_version
+
+    # - name: Display PostgreSQL version
+    #   debug:
+    #     msg: "{{ psql_version.stdout }}"   
+
+   
+    

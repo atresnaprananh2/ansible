@@ -1,0 +1,64 @@
+- hosts: all
+  name: Postgre patch
+  vars:
+    postgresql_version: 16  # Target PostgreSQL version
+    old_version: 15
+    postgredatadir: /var/lib/
+  tasks:
+  
+    - name: Run pg_dumpall
+      shell: sudo -u postgres pg_dumpall > {{ postgredatadir }}pgsql/backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
+      register: chk1
+      args:
+        chdir: '{{ postgredatadir }}pgsql'
+
+    - name: Stop old svc 
+      shell: sudo -u postgres pg_ctl stop -D {{ postgredatadir }}pgsql/{{ old_version }}/data
+      register: chk3
+      args:
+        chdir: '{{ postgredatadir }}pgsql' 
+     
+ 
+    - name: Install or update PostgreSQL packages
+      yum:
+        name:
+          - postgresql{{ postgresql_version }}
+          - postgresql{{ postgresql_version }}-server
+        state: latest
+
+    - name: Init new db  
+      shell: sudo -u postgres /usr/pgsql-{{ postgresql_version }}/bin/initdb -D {{ postgredatadir }}pgsql/{{ postgresql_version }}/data
+      register: chk4
+      args:
+        chdir: '{{ postgredatadir }}pgsql'
+
+    - name: Perform PostgreSQL upgrade
+      command: sudo -u postgres /usr/pgsql-{{ postgresql_version }}/bin/pg_upgrade -b /usr/pgsql-{{ old_version }}/bin -B /usr/pgsql-{{ postgresql_version }}/bin -d /var/lib/pgsql/{{ old_version }}/data -D /var/lib/pgsql/{{ postgresql_version }}/data
+      args:
+        chdir: '{{ postgredatadir }}pgsql'
+
+    - name: start new db   
+      shell: sudo -u postgres /usr/pgsql-{{ postgresql_version }}/bin/pg_ctl  -D {{ postgredatadir }}pgsql/{{ postgresql_version }}/data start
+      register: chk7
+      args:
+        chdir: '{{ postgredatadir }}pgsql' 
+
+    - name: vacuum DB    
+      shell: sudo -u postgres /usr/pgsql-{{ postgresql_version }}/bin/vacuumdb -U postgres --all --analyze-in-stages 
+      register: chk8
+      args:
+        chdir: '{{ postgredatadir }}pgsql'
+      
+  
+    - name: Clean up old PostgreSQL packages
+      yum:
+        name: postgresql{{ old_version }}*
+        state: absent
+
+    - name: set command links
+      shell: sudo ln -s /usr/pgsql-{{ postgresql_version }}/bin/* /usr/bin/ --force
+      args:
+        chdir: '{{ postgredatadir }}pgsql'
+
+    
+   

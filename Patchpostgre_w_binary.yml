@@ -1,0 +1,50 @@
+---
+- name: Upgrade PostgreSQL from 15 to 16 on Windows using pg_upgrade
+  hosts: windows
+  tasks:
+    - name: Stop PostgreSQL 15 service
+      ansible.windows.win_service:
+        name: postgresql-x64-15
+        state: stopped
+
+    - name: Backup PostgreSQL data
+      ansible.windows.win_command:
+        command: 'powershell.exe -Command "Copy-Item -Path ''C:\Program Files\PostgreSQL\15\data'' -Destination ''C:\PostgreSQL_Backup'' -Recurse -Force"'
+
+    - name: Download PostgreSQL 16 installer
+      ansible.windows.win_get_url:
+        url: https://get.enterprisedb.com/postgresql/postgresql-16.0-windows-x64-binaries.zip
+        dest: C:\Temp\postgresql-16.0-windows-x64-binaries.zip
+
+    - name: Unzip PostgreSQL 16 installer
+      ansible.windows.win_unzip:
+        src: C:\Temp\postgresql-16.0-windows-x64-binaries.zip
+        dest: C:\Temp\postgresql-16.0
+
+    - name: Install PostgreSQL 16
+      ansible.windows.win_command:
+        command: 'C:\Temp\postgresql-16.0\install-postgresql.exe --unattendedmodeui minimal --mode unattended --superpassword yourpassword'
+
+    - name: Initialize new PostgreSQL 16 cluster
+      ansible.windows.win_command:
+        command: 'C:\Program Files\PostgreSQL\16\bin\initdb.exe -D "C:\Program Files\PostgreSQL\16\data"'
+
+    - name: Run pg_upgrade
+      ansible.windows.win_command:
+        command: >
+          'C:\Program Files\PostgreSQL\16\bin\pg_upgrade.exe
+          -b "C:\Program Files\PostgreSQL\15\bin"
+          -B "C:\Program Files\PostgreSQL\16\bin"
+          -d "C:\Program Files\PostgreSQL\15\data"
+          -D "C:\Program Files\PostgreSQL\16\data"
+          -U postgres'
+
+    - name: Start PostgreSQL 16 service
+      ansible.windows.win_service:
+        name: postgresql-x64-16
+        state: started
+
+    - name: Clean up old PostgreSQL 15 installation
+      ansible.windows.win_command:
+        command: 'powershell.exe -Command "Remove-Item -Path ''C:\Program Files\PostgreSQL\15'' -Recurse -Force"'
+        ignore_errors: yes0

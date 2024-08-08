@@ -2,7 +2,7 @@
   name: Postgre patch
   vars:
     ver: 16
-    minorver: 2
+    minorver: 0
     oldver: 15
     postgredir: /var/lib/
   tasks:
@@ -124,5 +124,5 @@
       args:
         chdir: '{{ postgredir }}pgsql'
       when: ver != oldver
-
+  
    
