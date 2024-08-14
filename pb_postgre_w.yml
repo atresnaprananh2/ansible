@@ -6,6 +6,7 @@
     postgredir: /var/lib/
     my_mood: happy
     urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259105
+    postgres_version: "16"
   tasks:
    
     - name: Stop PostgreSQL 15 service
@@ -22,62 +23,122 @@
         url: "{{ urlpatch }}"
         dest: C:\postgresql-16.3-windows-x64.exe
     
-  
-    # - name: Install PostgreSQL silently
-    #   ansible.windows.win_package:
-    #     path: C:\postgresql-16.3-windows-x64.exe
-    #     creates_path: C:\Program Files\PostgreSQL\16\
-    #     state: present
-    #     arguments: /S
-    # - name: Ensure required Visual C++ Redistributable is installed
-    #   win_chocolatey:
-    #     name: vcredist140
-    #     state: present
+    # - name: Ensure PostgreSQL service is running
+    #   win_service:
+    #     name: postgresql-16.3
+    #     start_mode: auto
+    #     state: started
 
-    # - name: Install PostgreSQL silently
-    #   win_shell: C:\postgresql-16.3-windows-x64.exe --mode unattended --unattendedmodeui none --superpassword "P@ssw0rdnh2" --servicename "postgresql" --serviceaccount "NT AUTHORITY\NetworkService"
-    #   args:
-    #     executable: cmd
-    #   register: install_output
-    # - name: Ensure installation directories are clean
-    #   ansible.windows.win_command:
-    #     _raw_params: 'powershell.exe -Command "Remove-Item -Path ''C:\Program Files\PostgreSQL\16'' -Recurse -Force"'
-    #   failed_when: false  # This allows the playbook to continue even if the directory doesn't exist
-    #   ignore_errors: yes
+    - name: Install PostgreSQL 16
+      win_command: >
+        powershell -command "Start-Process -FilePath 'C:\postgresql-16.3-windows-x64.exe' -ArgumentList '--unattendedmodeui minimal --mode unattended --servicename "postgresql-16.3" --superaccount "postgres" --superpassword "P@ssw0rdnh2"' -Wait"
+      register: install_output
     
-    # - name: Install PostgreSQL 16
-    #   ansible.windows.win_command:
-    #     _raw_params: ' C:\postgresql-16.3-windows-x64.exe --unattendedmodeui minimal --mode unattended --superpassword P@ssw0rdnh2'
-    #   register: install_result
-    #   failed_when: "'Problem running post-install step' in install_result.stdout"
-    #   ignore_errors: true
+    - name: Print install output
+      debug:
+        var: install_output
+        
+    - name: Initialize PostgreSQL 16 data directory
+      win_command: 'cmd /c ""%PROGRAMFILES%\PostgreSQL\16\bin\initdb.exe" -D "C:\Program Files\PostgreSQL\16\data""'
 
-    # - name: Print install output
+    - name: Set PostgreSQL service variables
+      set_fact:
+        service_name: "postgresql{{ postgres_version }}"
+        bin_path: "C:\\Program Files\\PostgreSQL\\{{ postgres_version }}\\bin\\pg_ctl.exe"
+        data_dir: "C:\\Program Files\\PostgreSQL\\{{ postgres_version }}\\data"
+
+    - name: Create the PostgreSQL service
+      win_shell: |
+        $serviceName = "{{ service_name }}"
+        $binPath = "{{ bin_path }}"
+        $dataDir = "{{ data_dir }}"
+
+        # Build the command
+        $command = "`"$binPath`" runservice -N $serviceName -D `"$dataDir`""
+
+        # Remove existing service if it exists
+        if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+            Stop-Service -Name $serviceName -Force
+            sc.exe delete $serviceName
+        }
+
+        # Create the service
+        New-Service -Name $serviceName `
+                    -BinaryPathName $command `
+                    -DisplayName "PostgreSQL-{{ postgres_version }}" `
+                    -StartupType Automatic
+
+    - name: Start the PostgreSQL service
+      win_service:
+        name: "{{ service_name }}"
+        start_mode: auto
+        state: started
+      ignore_errors: yes
+
+    - name: Verify PostgreSQL service status
+      win_shell: |
+        Get-Service -Name "{{ service_name }}"
+      register: service_status
+
+    - debug:
+        var: service_status
+    # - name: Run PowerShell script to create the PostgreSQL service
+    #   register: svcout
+    #   win_shell: |
+    #     $serviceName = "postgresql16"
+    #     $binPath = "C:\\Program Files\\PostgreSQL\\16\\bin\\pg_ctl.exe"
+    #     $dataDir = "C:\\Program Files\\PostgreSQL\\16\\data"
+
+    #     # Build the command
+    #     $command = "`"$binPath`" runservice -N $serviceName -D `"$dataDir`""
+
+    #     # Create the service
+    #     New-Service -Name $serviceName `
+    #                 -BinaryPathName $command `
+    #                 -DisplayName "postgre16svc" `
+    #                 -StartupType Automatic
+
+    #     # Start the service
+    #     Start-Service -Name $serviceName
+
+    #     # Check the service status
+    #     Get-Service -Name $serviceName
+    
+    # - name: Print svc output
     #   debug:
-    #     var: install_result
+    #     var: svcout
 
-    # - name: Install PostgreSQL 16
-    #   ansible.windows.win_command:
-    #     _raw_params: 'C:\postgresql-16.3-windows-x64.exe --unattendedmodeui minimal --mode unattended --superpassword P@ssw0rdnh2'
-    #   register: install_output
+    
+     
 
-    # - name: Print install output
-    #   debug:
-    #     var: install_output
 
-    # - name: Install PostgreSQL 16
-    #   win_command: >
-    #     powershell -command "Start-Process -FilePath 'C:\postgresql-16.3-windows-x64.exe' -ArgumentList '/SILENT' -Wait"
 
-    # - name: Initialize PostgreSQL 16 data directory
-    #   win_command: 'cmd /c ""%PROGRAMFILES%\PostgreSQL\16\bin\initdb.exe" -D "C:\Program Files\PostgreSQL\16\data""'
+    
      
     # - name: Stop PostgreSQL 16 service
     #   win_service:
     #     name: postgresql-x64-16
     #     state: stopped
       
-  
+
+    # - name: Upgrade PostgreSQL
+    #   win_shell: |
+    #     "%PROGRAMFILES%\PostgreSQL\16\bin\pg_upgrade.exe" -b "C:\Program Files\PostgreSQL\15\bin" -B "C:\Program Files\PostgreSQL\16\bin" -d "C:\Program Files\PostgreSQL\15\data" -D "C:\Program Files\PostgreSQL\16\data"
+    # - name: Run pg_upgrade from PostgreSQL 15 to 16
+    #   win_shell: |
+    #     set PGPASSWORD=P@ssw0rdnh2
+    #     "%PROGRAMFILES%\PostgreSQL\16\bin\pg_upgrade.exe" \
+    #     -b "C:\Program Files\PostgreSQL\15\bin" \
+    #     -B "C:\Program Files\PostgreSQL\16\bin" \
+    #     -d "C:\Program Files\PostgreSQL\15\data" \
+    #     -D "C:\Program Files\PostgreSQL\16\data" \
+    #     -o "-c config_file=C:\Program Files\PostgreSQL\15\data\postgresql.conf" \
+    #     -O "-c config_file=C:\Program Files\PostgreSQL\16\data\postgresql.conf"
+    # - name: stopped PostgreSQL 15 service
+    #   win_service:
+    #     name: postgresql-x64-15
+    #     state: started
+
     # - name: Migrate data from PostgreSQL 15 to 16 
     #   win_command: 'cmd /c ""%PROGRAMFILES%\PostgreSQL\16\bin\pg_upgrade.exe" -b "C:\Program Files\PostgreSQL\15\bin" -B "C:\Program Files\PostgreSQL\16\bin" -d "C:\Program Files\PostgreSQL\15\data" -D "C:\Program Files\PostgreSQL\16\data""'
      

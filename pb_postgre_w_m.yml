@@ -1,0 +1,71 @@
+- hosts: win2
+  vars:
+    ver: 16
+    minorver: 2
+    oldver: 15
+    postgredir: /var/lib/
+    my_mood: happy
+    urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
+    postgres_version: "16"
+  tasks:
+  
+    - name: Get PostgreSQL installation base directory from registry
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations
+      register: postgres_installations
+
+    - name: Get the first installation ID
+      set_fact:
+        installation_id: "{{ postgres_installations.sub_keys[0] }}"
+
+    - name: Retrieve installation directory
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}\Base Directory
+      register: postgres_installation_dir
+
+    - name: Retrieve installation directory 2
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
+      register: postgres_installation_dir2
+
+    - name: Set fact base dir
+      set_fact:
+        basedir: "{{ postgres_installation_dir2.properties['Base Directory']['value'] }}"
+        datadir: "{{ postgres_installation_dir2.properties['Data Directory']['value'] }}"
+
+    - name: Stop PostgreSQL 15 service
+      win_service:
+        name: postgresql-x64-15
+        state: stopped
+
+    - name: Backup PostgreSQL data directory
+      win_command: >
+        powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+
+    - name: Download PostgreSQL 16 installer
+      win_get_url:
+        url: "{{ urlpatch }}"
+        dest: C:\postgresql-15.8-1-windows-x64.exe
+    
+    - name: Install PostgreSQL 15
+      win_command: >
+        powershell -command "Start-Process -FilePath 'C:\postgresql-15.8-1-windows-x64.exe' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
+      register: install_output
+
+    # - name: Install PostgreSQL 15
+    #   win_command: >
+    #     powershell -command "Start-Process -FilePath 'C:\postgresql-15.8-1-windows-x64.exe' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "C:\PostgreSQL" --datadir "C:\PostgreSQL\Data"' -Wait"
+    #   register: install_output
+    
+    - name: Print install output
+      debug:
+        var: install_output
+
+    - name: start PostgreSQL 15 service
+      win_service:
+        name: postgresql-x64-15
+        state: started
+   
+    
+   
+    
