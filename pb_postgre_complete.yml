@@ -1,7 +1,7 @@
-- hosts: win2
-  # remote_user: root
-  # become: true
-  # become_user: root
+- hosts: postgre
+  remote_user: root
+  become: true
+  become_user: root
   gather_facts: yes
   name: System Discovery
   vars:
@@ -16,8 +16,6 @@
       debug:
         msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }}"
     
-  
-   
     - name: Gather installed package facts (linux based)
       ansible.builtin.package_facts:
       when: "'Windows' not in ansible_distribution"
@@ -28,6 +26,58 @@
       when: 
         - "'Windows' not in ansible_distribution"
         - "'postgresql' in ansible_facts.packages or 'postgresql-server' in ansible_facts.packages"
+    
+    - name: Find the path of psql
+      command: which psql
+      register: psql_path
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+
+
+    - name: Resolve the real path of psql
+      command: readlink -f "{{ psql_path.stdout }}"
+      register: binpathpsql
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+
+    # - name: get installation dir 
+    #   command: readlink which psql
+    #   register: binpathpsql
+    #   args:
+    #     chdir: '/var/lib'
+    #   when: "'RedHat' in ansible_distribution"
+
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ binpathpsql.stdout[:-4] }}"
+      
+      when: "'RedHat' in ansible_distribution"
+
+    - name: chk
+      debug:
+        var: basedirlnx
+      when: "'RedHat' in ansible_distribution"
+
+
+    # - name: Run pg_dumpall
+    #   shell: sudo -u postgres pg_dumpall > {{ postgredir }}pgsql/backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
+    #   register: chk1
+    #   args:
+    #     chdir: '{{ postgredir }}pgsql'
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: Stop old svc 
+    #   shell: sudo -u postgres pg_ctl stop -D {{ postgredir }}pgsql/{{ old_version }}/data
+    #   register: chk3
+    #   args:
+    #     chdir: '{{ postgredir }}pgsql' 
+    #   when: "'RedHat' in ansible_distribution"
+
+    
+
+    #Windows Host Script
 
     - name: Get PostgreSQL installation base directory from registry (windows)
       win_reg_stat:
@@ -35,13 +85,13 @@
       register: postgres_installations
       when: "'Windows' in ansible_distribution"
 
-    - name: Get Global PostgreSQL
+    - name: Get Global PostgreSQL (windows)
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
       register: postgresglobal
       when: "'Windows' in ansible_distribution"
     
-    - name: Check Postgre Installed Ver 
+    - name: Check Postgre Installed Ver (windows)
       debug:
         msg: "PostgreSQL {{ postgresglobal.properties['Version']['value'] }}"   
       when: "'Windows' in ansible_distribution"
@@ -67,35 +117,35 @@
 
       when: "'Windows' in ansible_distribution"
 
-    - name: Stop PostgreSQL 15 service
+    - name: Stop PostgreSQL 15 service (windows)
       win_service:
         name: "{{ serviceid }}"
         state: stopped
       when: "'Windows' in ansible_distribution"
 
-    - name: Backup PostgreSQL data directory
+    - name: Backup PostgreSQL data directory (windows)
       win_command: >
         powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
       when: "'Windows' in ansible_distribution"
 
-    - name: Download PostgreSQL 16 installer
+    - name: Download PostgreSQL 16 installer (windows)
       win_get_url:
         url: "{{ urlpatch }}"
         dest: C:\{{ installername }}
       when: "'Windows' in ansible_distribution"
 
-    - name: Install PostgreSQL 15
+    - name: Install PostgreSQL 15 (windows)
       win_command: >
         powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
       register: install_output
       when: "'Windows' in ansible_distribution"
 
-    - name: Print install output
+    - name: Print install output (windows)
       debug:
         var: install_output
       when: "'Windows' in ansible_distribution"
 
-    - name: Start PostgreSQL 15 service
+    - name: Start PostgreSQL 15 service (windows)
       win_service:
         name: "{{ serviceid }}"
         state: started
