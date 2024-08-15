@@ -1,0 +1,44 @@
+- hosts: postgre
+  remote_user: root
+  become: true
+  become_user: root
+  gather_facts: yes
+  name: System Discovery
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+    # - name: Display 
+    #   debug:
+    #     msg: "Hostname: {{ ansible_facts.hostname }}"   
+
+    - name: Display OS distribution and version
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }}"
+    - name: show OS and version
+      debug:
+        msg: "{{ ansible_distribution }}"
+      when: ansible_distribution == "RedHat"
+
+    - name: check windows
+      debug:
+        msg: "{{ ansible_distribution }}"
+      when: "'Windows' in ansible_distribution"
+   
+    - name: Gather installed package facts (linux based)
+      ansible.builtin.package_facts:
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Check if PostgreSQL is installed (linux)
+      debug:
+        msg: "{{ inventory_hostname }}: PostgreSQL is installed"
+      when: 
+        - "'Windows' not in ansible_distribution"
+        - "'postgresql' in ansible_facts.packages or 'postgresql-server' in ansible_facts.packages"
+
+    # - name: Save system facts to a file
+    #   local_action: 
+    #     module: copy 
+    #     content: "{{ ansible_facts | to_nice_json }}" 
+    #     dest: "./system_facts_{{ inventory_hostname }}.json"
+    #   delegate_to: localhost
+  

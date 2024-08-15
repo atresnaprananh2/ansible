@@ -1,0 +1,110 @@
+- hosts: win2
+  # remote_user: root
+  # become: true
+  # become_user: root
+  gather_facts: yes
+  name: System Discovery
+  vars:
+    installername: postgresqlinstall.exe
+    urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
+    service_pattern: postgresql
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+   
+    - name: Display OS distribution and version
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }}"
+    
+  
+   
+    - name: Gather installed package facts (linux based)
+      ansible.builtin.package_facts:
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Check if PostgreSQL is installed (linux)
+      debug:
+        msg: "{{ inventory_hostname }}: PostgreSQL is installed"
+      when: 
+        - "'Windows' not in ansible_distribution"
+        - "'postgresql' in ansible_facts.packages or 'postgresql-server' in ansible_facts.packages"
+
+    - name: Get PostgreSQL installation base directory from registry (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations
+      register: postgres_installations
+      when: "'Windows' in ansible_distribution"
+
+    - name: Get Global PostgreSQL
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
+      register: postgresglobal
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Check Postgre Installed Ver 
+      debug:
+        msg: "PostgreSQL {{ postgresglobal.properties['Version']['value'] }}"   
+      when: "'Windows' in ansible_distribution"
+
+    - name: Get the first installation ID (windows)
+      set_fact:
+        installation_id: "{{ postgres_installations.sub_keys[0] }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Retrieve installation directory (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
+      register: postgres_installation_dir2
+      when: "'Windows' in ansible_distribution"
+    
+   
+    - name: Set fact base dir (windows)
+      set_fact:
+        basedir: "{{ postgres_installation_dir2.properties['Base Directory']['value'] }}"
+        datadir: "{{ postgres_installation_dir2.properties['Data Directory']['value'] }}"
+        installedver: "{{ postgresglobal.properties['Version']['value'] }}"
+        serviceid: "{{ postgres_installation_dir2.properties['Service ID']['value'] }}"
+
+      when: "'Windows' in ansible_distribution"
+
+    - name: Stop PostgreSQL 15 service
+      win_service:
+        name: "{{ serviceid }}"
+        state: stopped
+      when: "'Windows' in ansible_distribution"
+
+    - name: Backup PostgreSQL data directory
+      win_command: >
+        powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Download PostgreSQL 16 installer
+      win_get_url:
+        url: "{{ urlpatch }}"
+        dest: C:\{{ installername }}
+      when: "'Windows' in ansible_distribution"
+
+    - name: Install PostgreSQL 15
+      win_command: >
+        powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
+      register: install_output
+      when: "'Windows' in ansible_distribution"
+
+    - name: Print install output
+      debug:
+        var: install_output
+      when: "'Windows' in ansible_distribution"
+
+    - name: Start PostgreSQL 15 service
+      win_service:
+        name: "{{ serviceid }}"
+        state: started
+      when: "'Windows' in ansible_distribution"
+
+
+    
+
+
+
+
+    
