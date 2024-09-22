@@ -1,7 +1,4 @@
-- hosts: postgre
-  remote_user: root
-  become: true
-  become_user: root
+- hosts: all
   gather_facts: yes
   name: System Discovery
   vars:
@@ -48,18 +45,6 @@
         basedirlnx: "{{ binpathpsql.stdout[:-4] }}"
       
       when: "'RedHat' in ansible_distribution"
-    
-    - name: Set fact base dir before bin (linux)
-      set_fact:
-        basedirpg: "{{ basedirlnx[:-5] }}"
-      
-      when: "'RedHat' in ansible_distribution"
-     
-    - name: chk basedir
-      debug:
-        msg: "{{ basedirpg }}"
-      when: 
-        - "'Windows' not in ansible_distribution"
 
   
     - name: Find the path of postgre data  (linux)
@@ -101,7 +86,7 @@
         var: major_ver
       when: "'RedHat' in ansible_distribution"
 
-    
+
     - name: Run pg_dumpall  (linux)
       shell: sudo -u postgres pg_dumpall > {{ datadirshrt }}backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
       register: chk1
@@ -115,67 +100,14 @@
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
-
-    - name: Check latest version (above ver 10 linux)
-      shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ major_ver }}\.[0-9]+' | sort -V | tail -1
-      register: latestver
-      args:
-        chdir: '/var/lib'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "major_ver | int >= 11"
-    - name: chk ver
-      debug:
-        msg:
-          - "{{ latestver.stdout }}"
-      when: "'RedHat' in ansible_distribution"
-
     
-    - name: download patch data
-      command: wget https://ftp.postgresql.org/pub/source/v{{ latestver.stdout[1:] }}/postgresql-{{ latestver.stdout[1:] }}.tar.gz
+    - name: Install or update PostgreSQL packages  (linux)
+      yum:
+        name:
+          - postgresql{{ major_ver }}
+          - postgresql{{ major_ver }}-server
+        state: latest
       when: "'RedHat' in ansible_distribution"
-    
-    - name: Extract patch data
-      command: tar -xzf postgresql-{{ latestver.stdout[1:] }}.tar.gz
-      when: "'RedHat' in ansible_distribution"
-
-    - name: install devel kit
-      command: sudo yum install gcc readline-devel zlib-devel -y
-      when: "'RedHat' in ansible_distribution"
-
-    - name: configure installer
-      shell: ./configure --prefix={{ basedirpg }} --without-icu
-      register: chk2
-      args:
-        chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
-
-    - name: make file 
-      command: make
-      args:
-        chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
-      when: "'RedHat' in ansible_distribution"
-     
-
-    - name: make install 
-      command: make install
-      register: chkins
-      args:
-        chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
-      when: "'RedHat' in ansible_distribution"
-    
-    - name: chk configure
-      debug:
-        msg:
-          - "{{ chkins.stdout }}"
-      when: "'RedHat' in ansible_distribution"
-
-    # - name: Install or update PostgreSQL packages  (linux)
-    #   yum:
-    #     name:
-    #       - postgresql{{ major_ver }}
-    #       - postgresql{{ major_ver }}-server
-    #     state: latest
-    #   when: "'RedHat' in ansible_distribution"
     
     - name: Start old svc   (linux)
       shell: sudo -u postgres pg_ctl start -D {{ datadirlnx }}
@@ -200,12 +132,18 @@
     - name: Get PostgreSQL installation base directory from registry (windows)
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL\Installations
+      become: yes
+      become_method: runas
+      become_user: postgres
       register: postgres_installations
       when: "'Windows' in ansible_distribution"
 
     - name: Get Global PostgreSQL (windows)
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
+      become: yes
+      become_method: runas
+      become_user: postgres
       register: postgresglobal
       when: "'Windows' in ansible_distribution"
     
@@ -222,6 +160,9 @@
     - name: Retrieve installation directory (windows)
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
+      become: yes
+      become_method: runas
+      become_user: postgres
       register: postgres_installation_dir2
       when: "'Windows' in ansible_distribution"
     
@@ -239,22 +180,34 @@
       win_service:
         name: "{{ serviceid }}"
         state: stopped
+      become: yes
+      become_method: runas
+      become_user: postgres
       when: "'Windows' in ansible_distribution"
 
     - name: Backup PostgreSQL data directory (windows)
       win_command: >
         powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+      become: yes
+      become_method: runas
+      become_user: postgres
       when: "'Windows' in ansible_distribution"
 
     - name: Download PostgreSQL 16 installer (windows)
       win_get_url:
         url: "{{ urlpatch }}"
         dest: C:\{{ installername }}
+      become: yes
+      become_method: runas
+      become_user: postgres
       when: "'Windows' in ansible_distribution"
 
     - name: Install PostgreSQL 15 (windows)
       win_command: >
         powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
+      become: yes
+      become_method: runas
+      become_user: postgres
       register: install_output
       when: "'Windows' in ansible_distribution"
 
@@ -267,6 +220,9 @@
       win_service:
         name: "{{ serviceid }}"
         state: started
+      become: yes
+      become_method: runas
+      become_user: postgres
       when: "'Windows' in ansible_distribution"
 
 

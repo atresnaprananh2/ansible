@@ -1,0 +1,53 @@
+- hosts: all
+  remote_user: root
+  become: true
+  become_user: root
+  gather_facts: yes
+  name: System Discovery
+  vars: 
+    - script_url: http://172.19.2.98/scripts/
+
+  tasks:
+    - name: Run Python code directly within Ansible
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            ts.authenticate("aditya", "P@ssw0rdnh2")
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            data = []
+            for server_ref in server_refs:
+                try:
+                    server_details = ts.server.ServerService.getServerVO(server_ref)
+                    custattr = ts.server.ServerService.getCustAttrs(server_ref,None, False)
+                    for attr_name, attr_value in custattr.items():
+                        if attr_name != "__OPSW_reachability_time" :
+                            row = {
+                                    "Host": server_details.hostName,
+                                    "IP": server_details.primaryIP,
+                                    f"{attr_name}": attr_value
+                                  }
+                            data.append(row) 
+                except Exception as e:
+                    print(f"Error processing server {server_ref.getId()}: {e}")
+            json_data = json.dumps(data, indent=4)
+            print(json_data) 
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output.stdout }}" 

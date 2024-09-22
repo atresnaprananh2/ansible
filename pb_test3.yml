@@ -1,0 +1,25 @@
+- name: Run tasks as another user on a Windows host
+  hosts: win
+  tasks:
+    - name: Run a command as another user
+      win_command: whoami
+      become: yes
+      become_method: runas
+      become_user: postgres  # Ensure this user has permission to execute the command
+      register: test1
+      
+    - name: Display the whoami output
+      debug:
+        msg: "The logged-in user is: {{ test1.stdout }}"
+
+
+    - name: Run a script as another user
+      win_shell: |
+        echo "Running as {{ ansible_user }}"
+      become: yes
+      become_method: runas
+      become_user: administrator  # Ensure this user has permission to execute the script
+      register: test2
+    - name: Display the whoami output
+      debug:
+        msg: "The logged-in user is: {{ test2.stdout }}"

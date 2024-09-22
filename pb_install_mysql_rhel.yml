@@ -1,0 +1,165 @@
+- name: Fetch and Download the Latest MySQL 5.7 RPM files
+  hosts: mysqlrhel
+  become: yes
+  remote_user: root
+  become: true
+  become_user: root
+  gather_facts: yes
+  vars:
+    mysql_rpm_dir: /root/mysql_rpms
+    suffix: ".rpm"
+  tasks:
+    - name: Get MySQL version
+      shell: "mysql -V"
+      register: mysql_version_output
+      failed_when: mysql_version_output.rc != 0
+
+    - name: Extract MySQL major version
+      set_fact:
+        mysql_major_version: "{{ mysql_version_output.stdout | regex_search('Distrib ([0-9]+\\.[0-9]+)', '\\1') }}"
+    
+    - name: Debug - Show MySQL Major Version
+      debug:
+        msg: "The installed MySQL major version is {{ mysql_major_version[0].split('.')[0] }}"
+
+    - name: tst
+      debug:
+        msg: "{{ ansible_facts.architecture }}"
+
+    
+    - name: Retrieve Repository 
+      shell: |
+        curl -s https://repo.mysql.com/yum/ | grep -o 'mysql-{{ mysql_major_version[0].split('.')[0] }}\.[0-9]*-[^"/]*' | sort -V | tail -n 1
+      register: latest_repo
+    
+    - name: chk latest repo
+      debug:
+        msg: "{{ latest_repo.stdout }}"
+
+    - name: create link download
+      set_fact:
+          mysql_base_url: "https://repo.mysql.com/yum/{{ latest_repo.stdout }}/el/{{ ansible_facts.distribution_major_version }}/{{ ansible_facts.architecture }}/"
+       
+
+    - name: Ensure MySQL RPM directory exists
+      file:
+        path: "{{ mysql_rpm_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Fetch server file  for MySQL 5.7
+      shell: |
+        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-server[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
+      register: svr_filenames
+    
+    - name: Fetch lib file  for MySQL 5.7
+      shell: |
+        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-libs[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
+      register: lib_filenames
+
+    - name: Fetch common file  for MySQL 5.7
+      shell: |
+        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-common[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
+      register: common_filenames
+
+    - name: Fetch client file  for MySQL 5.7
+      shell: |
+        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-client[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
+      register: client_filenames
+    
+    - name: Download MySQL svr rpm 
+      get_url:
+        url: "{{ mysql_base_url }}{{ item }}"
+        dest: "{{ mysql_rpm_dir }}/{{ item }}"
+        mode: '0644'
+      with_items: "{{ svr_filenames.stdout_lines }}"
+
+    - name: Download MySQL lib rpm 
+      get_url:
+        url: "{{ mysql_base_url }}{{ item }}"
+        dest: "{{ mysql_rpm_dir }}/{{ item }}"
+        mode: '0644'
+      with_items: "{{ lib_filenames.stdout_lines }}"
+    
+    - name: Download MySQL common rpm 
+      get_url:
+        url: "{{ mysql_base_url }}{{ item }}"
+        dest: "{{ mysql_rpm_dir }}/{{ item }}"
+        mode: '0644'
+      with_items: "{{ common_filenames.stdout_lines }}"
+    
+    - name: Download MySQL client rpm 
+      get_url:
+        url: "{{ mysql_base_url }}{{ item }}"
+        dest: "{{ mysql_rpm_dir }}/{{ item }}"
+        mode: '0644'
+      with_items: "{{ client_filenames.stdout_lines }}"
+ 
+    - name: Get a list of installed MySQL RPMs
+      shell: rpm -qa | grep -i mysql
+      register: mysql_rpm_list
+
+    - name: Set the list of installed MySQL RPMs as a fact
+      set_fact:
+        mysql_rpm_packages: "{{ mysql_rpm_list.stdout_lines }}"
+
+    - name: Debug - Show installed MySQL RPMs
+      debug:
+        msg: "{{ mysql_rpm_packages }}"
+
+    - name: Uninstall MySQL RPMs
+      yum:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ mysql_rpm_packages }}"
+
+    - name: Debug - Confirmation of uninstallation
+      debug:
+        msg: "Uninstalled RPMs: {{ mysql_rpm_packages }}"
+
+
+    - name: Find all installation files in the directory
+      find:
+        paths: "{{ mysql_rpm_dir }}"
+        file_type: file
+      register: found_files
+
+    - name: Extract filenames from the list
+      set_fact:
+        filenames: "{{ found_files.files | map(attribute='path') | map('basename') | list }}"
+    
+
+    - name: Install MySQL 5.7 RPM common
+      yum:
+        name: "{{ mysql_rpm_dir }}/{{ common_filenames.stdout }}"
+        state: present
+    - name: Install MySQL 5.7 RPM lib
+      yum:
+        name: "{{ mysql_rpm_dir }}/{{ lib_filenames.stdout }}"
+        state: present
+
+    - name: Install MySQL 5.7 RPM svr
+      yum:
+        name: "{{ mysql_rpm_dir }}/{{ svr_filenames.stdout }}"
+        state: present
+    - name: Install MySQL 5.7 RPM client
+      yum:
+        name: "{{ mysql_rpm_dir }}/{{ client_filenames.stdout }}"
+        state: present
+
+      
+    - name: Ensure MySQL service is started and enabled
+      service:
+        name: mysqld
+        state: started
+        enabled: yes
+
+    - name: Check MySQL version
+      command: mysql -V
+      register: mysql_version
+
+    - name: Debug - Show MySQL version
+      debug:
+        msg: "MySQL version is {{ mysql_version.stdout }}"

@@ -1,0 +1,66 @@
+- name: Download and install MySQL 5.7 from the archives
+  hosts: mysqlrhel
+  become: yes
+  remote_user: root
+  become: true
+  become_user: root
+  gather_facts: yes
+  tasks:
+
+    # - name: Check current MySQL version
+    #   shell: mysql --version
+    #   register: mysql_version
+    #   ignore_errors: yes
+
+    # - name: Stop MySQL service if running
+    #   service:
+    #     name: mysqld
+    #     state: stopped
+
+    # - name: Backup MySQL data directory
+    #   command: cp -r /var/lib/mysql /var/lib/mysql_bak_{{ ansible_date_time.date }}
+    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    - name: Download MySQL 5.7 tar.gz from archives
+      get_url:
+        url: "http://172.19.2.98/patches/mysql-5.6.51-linux-glibc2.12-x86_64.tar.gz"
+        dest: "/var/tmp/mysql-5.6.51-linux-glibc2.12-x86_64.tar.gz  "
+        mode: '0755'
+      # when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    # - name: Extract MySQL tarball
+    #   unarchive:
+    #     src: /var/lib/temp/mysql-5.7.44-el7-x86_64.tar.gz
+    #     dest: /usr/local
+    #     remote_src: yes
+    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    # - name: Update symbolic link to new MySQL version
+    #   file:
+    #     src: /usr/local/mysql-5.7.44-el7-x86_64
+    #     dest: /usr/local/mysql
+    #     state: link
+    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    # - name: Update MySQL configuration file
+    #   copy:
+    #     src: /path/to/new/my.cnf
+    #     dest: /etc/my.cnf
+    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    # - name: Run MySQL upgrade script
+    #   shell: "/usr/local/mysql/bin/mysql_upgrade"
+    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    # - name: Start MySQL service
+    #   service:
+    #     name: mysqld
+    #     state: started
+
+    # - name: Verify MySQL version after upgrade
+    #   shell: mysql --version
+    #   register: new_mysql_version
+    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+
+    # - debug:
+    #     msg: "MySQL has been successfully upgraded to version {{ new_mysql_version.stdout }}."

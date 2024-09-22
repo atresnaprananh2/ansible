@@ -1,0 +1,56 @@
+- hosts: win
+  name: test playbook
+  gather_facts: yes
+  # vars:
+  #   # ansible_remote_tmp: C:/tmp
+  #   # ansible_user: administrator 
+  #   # ansible_connection: ssh 
+  #   # ansible_port: 22 
+  #   ansible_user: 'postgres'
+  #   ansible_password: 'P@ssw0rdnh2'
+  #   ansible_port: 5985
+  #   ansible_connection: 'winrm'
+  #   ansible_winrm_transport: 'ntlm'
+  #   ansible_winrm_server_cert_validation: 'ignore'
+
+  tasks:
+   - name: testcmd
+     win_command: |
+         ipconfig
+     register: out 
+   - debug:
+       msg: "{{ out }}"
+   - name: Execute whoami command
+     win_shell: whoami
+     register: whoami_output
+
+   - name: Display the whoami output
+     debug:
+       msg: "The logged-in user is: {{ whoami_output.stdout }}"
+
+   - name: Display the whoami output
+     debug:
+       msg: "The logged-in user is: {{ whoami_output.stdout }}"
+
+   - name: Run a command as another user
+     win_command: whoami
+     become: yes
+     become_method: runas
+     become_user: postgres
+     become_pass: P@ssw0rdnh2
+     register: testuser
+  
+   - name: Display the whoami output
+     debug:
+       msg: "The logged-in user is: {{ testuser.stdout }}"
+
+   
+  #  - name: Ensure a directory exists
+  #    ansible.builtin.file:
+  #      path: C:\Temp\example_directory
+  #      state: directory
+
+
+  
+
+   
