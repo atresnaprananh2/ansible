@@ -93,6 +93,14 @@
         orahomesize: "{{ oracle_home_size.stdout }}"
         rootsize: "{{ byteleft | float * (1/1000000000)  }}"
       when: "'RedHat' in ansible_distribution"
+
+    - name: Extract major Oracle version (12.2.0)
+      set_fact:
+        oracle_major_version: "{{ oracleversion | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
+
+    - name: Display major Oracle version
+      debug:
+        msg: "The Oracle major version is: {{ oracle_major_version }}"
     
     - name: check port   (linux)
       debug:
@@ -138,6 +146,31 @@
       debug:
         msg: "Oracle OS User: {{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}"
 
+    - name: Run ps command and grep for tnslsnr
+      shell: ps -ef | grep tnslsnr | grep -v grep
+      register: ps_output
+
+    - name: Extract tnslsnr path
+      shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
+      register: tnslsnr_path
+
+    - name: Display tnslsnr executable path without newline
+      debug:
+        msg: |
+          {% if tnslsnr_path.stdout != "" %}
+            The Oracle listener executable (tnslsnr) path is: {{ tnslsnr_path.stdout }}
+          {% else %}
+            tnslsnr executable not found.
+          {% endif %}
+
+    - name: Extract listener name from process details
+      set_fact:
+        listener_name: "{{ ps_output.stdout | regex_search('tnslsnr\\s+(\\S+)') | replace('tnslsnr ', '') | trim }}"
+
+    - name: Display listener name
+      debug:
+        msg: "The Oracle listener name is: {{ listener_name }}"
+
     - name: Push custom attributes to selected server
       shell: |
         ./python3 - << 'EOF'
@@ -158,7 +191,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'RootSpace': '{{ rootsize }}','OracleHomeSpace': '{{ orahomesize }}', 'Cluster': 'No', 'OSVersion': '{{ osver }}', 'DBVersion_Oracle':'{{ oracleversion }}','OPatch_Version':'{{ opatchversion }}', 'databaseplatform': 'Oracle', 'Oracle_Home':'{{ oraclehome }}', 'os_user': 'oracle', 'port': '{{ oraport[0] }}', 'autorun': '{{ autorun }}', 'instance': '{{ instance }}'}
+                        CAMap = {'RootSpace': '{{ rootsize }}','OracleHomeSpace': '{{ orahomesize }}', 'Cluster': 'No', 'OSVersion': '{{ osver }}', 'DBVersion_Oracle':'{{ oracleversion }}', 'oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'oracle_sid': '{{ instance }}','listenerpath' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Backup_location': 'test', 'patch_file_location': 'test','OPatch_Version':'{{ opatchversion }}', 'databaseplatform': 'Oracle', 'port': '{{ oraport[0] }}', 'autorun': '{{ autorun }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
