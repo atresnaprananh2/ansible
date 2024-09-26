@@ -52,7 +52,6 @@
     - name: Set fact base dir before bin (linux)
       set_fact:
         basedirpg: "{{ basedirlnx[:-5] }}"
-      
       when: "'RedHat' in ansible_distribution"
      
     - name: chk basedir

@@ -1,0 +1,239 @@
+- hosts: winmysql
+  gather_facts: yes
+  name: System Discovery
+
+  vars:   
+    - mysqlpatch: http://172.19.2.98/patches/mysql-8.0.39-winx64.zip
+    - userdir: "C:\\Users\\Administrator\\"
+
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+  
+
+    - name: Display OS distribution and version (linux)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts['default_ipv4']['address'] }}"
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Display OS distribution and version (windows)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts.ip_addresses[1] }}"
+      when: "'Windows' in ansible_distribution"
+
+    #Windows Host Script
+
+    - name: Get MySQL installation base directory from registry (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB
+      register: mysql_installation
+      when: "'Windows' in ansible_distribution"
+    - name: Get MySQL installation base directory from registry down by 1 level (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation.sub_keys[0] }}
+      register: mysql_installation_2
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Set fact base dir (windows)
+      set_fact:
+        
+        dataloc: "{{ mysql_installation_2.properties['DataLocation']['value']  }}"
+        binloc: "{{ mysql_installation_2.properties['Location']['value'][:-1]  }}"
+        mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
+    
+    - name: Display the mysql bin
+      debug:
+        var: binloc
+      when: "'Windows' in ansible_distribution"
+
+    # - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell
+    #   ansible.builtin.win_shell: |
+    #     $content = @"
+    #     [client]
+    #     user=root
+    #     password=Welcome123..
+    #     "@
+    #     $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+    #     [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
+    #   when: "'Windows' in ansible_distribution"
+   
+    # - name: Backup MySQL databases with mysqldump using defaults file
+    #   ansible.builtin.win_shell: |
+    #     .\mysqldump --defaults-file="{{ userdir }}.my.cnf" --all-databases > {{ userdir }}alldatabases_backup.sql
+    #   args:
+    #     chdir: "{{ binloc }}/bin" 
+    #   when: "'Windows' in ansible_distribution"
+
+    - name: Find MySQL services using sc query
+      ansible.builtin.win_shell: |
+        Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
+      register: mysql_services
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Extract the actual name from the string
+      set_fact:
+        service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the extracted service name
+      debug:
+        msg: "The service name is: {{ service_name }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Download MySQL Patch
+      win_get_url:
+        url: '{{ mysqlpatch }}'
+        dest: "{{ userdir }}"
+      when: "'Windows' in ansible_distribution"
+
+    # - name: Stop Svc
+    #   ansible.builtin.win_command: |
+    #     net stop {{ service_name }}
+
+    
+
+
+
+    # - name: Create Backup
+    #   ansible.builtin.win_command: 
+    #     # cmd:  mysql --version
+    #     cmd: mysqldump --defaults-file=.my.cnf --all-databases > alldatabases_backup.sql
+    #     chdir: "{{ binloc }}/bin"            
+    #   register: chkbak
+    #   when: "'Windows' in ansible_distribution"
+    # - name: chkrun
+    #   debug:
+    #     var: chkbak
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Display the PostgreSQL port
+    #   debug:
+    #     msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Execute SQL command to get PostgreSQL port
+    #   win_shell: |
+    #     $env:PGPASSWORD = "P@ssw0rdnh2"
+    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
+    #   become: yes
+    #   become_method: runas
+    #   become_user: postgres
+    #   register: postgremode
+    #   when: "'Windows' in ansible_distribution"
+    
+    # - name: Set mode (windows)
+    #   set_fact:
+    #     psqlmode: 'standalone'
+    #   when: 
+    #     - "'Windows' in ansible_distribution"
+    #     - "postgremode.stdout != 't'" 
+
+    # - name: Set fact port  (windows)
+    #   set_fact:
+    #     portpsql: "{{ postgres_port.stdout.strip() }}"
+    #   when: "'Windows' in ansible_distribution"
+       
+    
+
+    # # - name: Check latest version (above ver 10 windows)
+    # #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+' | sort -V | tail -1
+    # #   register: latestver
+    # #   when: 
+    # #     - "'Windows' in ansible_distribution"
+    # #     - "installedver | int >= 11"
+        
+    # # - name: Check latest version (above ver 10 windows)
+    # #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
+    # #   register: latestverold
+    # #   when: 
+    # #     - "'Windows' in ansible_distribution"
+    # #     - "installedver | int < 11"
+    # - name: Check Version
+    #   win_shell: |
+    #       # Ensure PowerShell uses TLS 1.2
+    #       [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    #       # Alternatively, use TLS 1.3 if supported
+    #       # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
+
+    #       # Now run your Invoke-WebRequest command
+    #       $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
+
+    #       # Extract version numbers that match "v15.x.x"
+    #       $versions = $response.Content -split "`n" | ForEach-Object {
+    #           if ($_ -match 'v{{ installedver }}\.[0-9]+') {
+    #               $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
+    #               if ($matches.Success) {
+    #                   $matches.Value
+    #               }
+    #           }
+    #       }
+
+    #       # Sort the versions and select the latest one
+    #       $latest_version = $versions | Sort-Object | Select-Object -Last 1
+
+    #       # Display the latest version
+    #       $latest_version
+    #   register: latestver
+    #   when: "'Windows' in ansible_distribution"
+    
+    # - name: check latest version  (windows)
+    #   debug:
+    #     var: latestver.stdout[1:-2]
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Set updateflag
+    #   set_fact:
+    #     needupdates: y
+    #   when: 
+    #     - "'Windows' in ansible_distribution"
+    #     - "installedver != latestver.stdout[1:-2]"
+
+    
+    
+
+      
+    
+
+    # # - name: Stop PostgreSQL 15 service (windows)
+    # #   win_service:
+    # #     name: "{{ serviceid }}"
+    # #     state: stopped
+    # #   when: "'Windows' in ansible_distribution"
+
+    # # - name: Backup PostgreSQL data directory (windows)
+    # #   win_command: >
+    # #     powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+    # #   when: "'Windows' in ansible_distribution"
+
+    # # - name: Download PostgreSQL 16 installer (windows)
+    # #   win_get_url:
+    # #     url: "{{ urlpatch }}"
+    # #     dest: C:\{{ installername }}
+    # #   when: "'Windows' in ansible_distribution"
+
+    # # - name: Install PostgreSQL 15 (windows)
+    # #   win_command: >
+    # #     powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
+    # #   register: install_output
+    # #   when: "'Windows' in ansible_distribution"
+
+    # # - name: Print install output (windows)
+    # #   debug:
+    # #     var: install_output
+    # #   when: "'Windows' in ansible_distribution"
+
+    # # - name: Start PostgreSQL 15 service (windows)
+    # #   win_service:
+    # #     name: "{{ serviceid }}"
+    # #     state: started
+    # #   when: "'Windows' in ansible_distribution"
+
+
+    
+
+
+
+
+    

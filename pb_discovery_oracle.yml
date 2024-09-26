@@ -4,6 +4,8 @@
   remote_user: root
   become: true
   become_user: root
+  vars: 
+    - patch_description: 'No Interim Patch installed'
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -27,6 +29,34 @@
       args:
         chdir: '/var/lib'
       when: "'RedHat' in ansible_distribution"
+
+    - name: Find the latest patch installed
+      command:  sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+      register: oraclelastpatch
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: check patch
+      debug:
+        var: oraclelastpatch
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Extract patch description
+      set_fact:
+        patchdesc: "{{ oraclelastpatch.stdout | regex_search('Patch description:  \"(.*?)\"', '\\1') }}"
+   
+
+    - name: check patch
+      set_fact:
+        patch_description: "{{ patchdesc[0] }}" 
+      when:  patchdesc != ''
+
+
+    - name: Display the extracted patch description
+      debug:
+        msg: "Extracted Patch Description: {{ patch_description }}"
+        
 
     - name: check latest version  (linux)
       debug:
@@ -191,7 +221,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'RootSpace': '{{ rootsize }}','OracleHomeSpace': '{{ orahomesize }}', 'Cluster': 'No', 'OSVersion': '{{ osver }}', 'DBVersion_Oracle':'{{ oracleversion }}', 'oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'oracle_sid': '{{ instance }}','listenerpath' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Backup_location': 'test', 'patch_file_location': 'test','OPatch_Version':'{{ opatchversion }}', 'databaseplatform': 'Oracle', 'port': '{{ oraport[0] }}', 'autorun': '{{ autorun }}'}
+                        CAMap = {'RootSpace': '{{ rootsize }}','Oracle_HomeSpace': '{{ orahomesize }}', 'Oracle_Cluster': 'No', 'Oracle_OSVersion': '{{ osver }}', 'Oracle_DBVersion':'{{ oracleversion }}', 'Oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'Oracle_Instance': '{{ instance }}','Oracle_Listener' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Oracle_Backup_Loc': 'test', 'patch_file_location': 'test','Oracle_OPatch_Version':'{{ opatchversion }}', 'Oracle_port': '{{ oraport[0] }}', 'Oracle_autorun': '{{ autorun }}', 'Oracle_PatchInfo': '{{ patch_description }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

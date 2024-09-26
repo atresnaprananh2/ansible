@@ -1,5 +1,5 @@
-- name: Download and install MySQL 5.7 from the archives
-  hosts: mysqlrhel
+- name: patch mysql 
+  hosts: mysqlrhel2
   become: yes
   remote_user: root
   become: true
@@ -17,16 +17,42 @@
     #     name: mysqld
     #     state: stopped
 
-    # - name: Backup MySQL data directory
-    #   command: cp -r /var/lib/mysql /var/lib/mysql_bak_{{ ansible_date_time.date }}
-    #   when: mysql_version.stdout.find('Distrib 5.6') != -1
+    - name: Backup MySQL data directory
+      command: mysqldump -u root -p --all-databases > all_databases_backup.sql
+
 
     - name: Download MySQL 5.7 tar.gz from archives
       get_url:
-        url: "http://172.19.2.98/patches/mysql-5.6.51-linux-glibc2.12-x86_64.tar.gz"
-        dest: "/var/tmp/mysql-5.6.51-linux-glibc2.12-x86_64.tar.gz  "
+        url: "https://dev.mysql.com/get/Downloads/MySQL-5.7/mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz"
+        dest: "/tmp/mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz"
         mode: '0755'
       # when: mysql_version.stdout.find('Distrib 5.6') != -1
+    
+    - name: stop svc
+      command: sudo systemctl stop mysqld
+
+    - name: extract mysql
+      command: tar -xvzf mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz
+
+    - name: backup mysql
+      command: sudo mv /usr/local/mysql /usr/local/mysql_bak
+
+    - name: copy mysql 
+      command: sudo mv mysql-5.7.44-linux-glibc2.12-x86_64 /usr/local/mysql
+
+    - name: update permission  
+      command: sudo chown -R mysql:mysql /usr/local/mysql
+
+    - name: update permission  
+      command: sudo systemctl start mysqld
+    
+    - name: update permission  
+      command: sudo /usr/local/mysql/bin/mysql_upgrade -u root -p
+    
+    - name: Cleanup  
+      command: sudo rm -rf /usr/local/mysql_bak
+
+
 
     # - name: Extract MySQL tarball
     #   unarchive:

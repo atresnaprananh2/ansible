@@ -4,8 +4,7 @@
   remote_user: root #remove when running on SA Client
   become: true #remove when running on SA Client
   become_user: root #remove when running on SA Client
-  vars:
-   
+  vars:   
     needupdates: n
     psqlmode: 'HA-Standby'
     mysql_user: 'student'
@@ -33,8 +32,8 @@
    
     - name: Check MySQL installation
       command: which mysql
-      environment:
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/path/to/mysql/bin"
+      # environment:
+      #   PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/path/to/mysql/bin"
       register: mysql_path
       ignore_errors: yes
     
