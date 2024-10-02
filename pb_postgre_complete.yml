@@ -1,4 +1,4 @@
-- hosts: postgre
+- hosts: postgreold
   remote_user: root
   become: true
   become_user: root
@@ -102,27 +102,27 @@
 
     
     - name: Run pg_dumpall  (linux)
-      shell: sudo -u postgres pg_dumpall > {{ datadirshrt }}backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
+      shell: sudo -u postgres pg_dumpall > {{ datadirshrt }}/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
       register: chk1
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
 
     - name: Stop old svc   (linux)
-      shell: sudo -u postgres pg_ctl stop -D {{ datadirlnx }}
+      shell: sudo -u postgres {{basedirlnx}}/pg_ctl stop -D {{ datadirlnx }}
       register: chk3
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Check latest version (above ver 10 linux)
+    - name: Check latest version (above ver 9 linux)
       shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ major_ver }}\.[0-9]+' | sort -V | tail -1
       register: latestver
       args:
         chdir: '/var/lib'
       when: 
         - "'RedHat' in ansible_distribution"
-        - "major_ver | int >= 11"
+        - "major_ver | int >= 10"
     - name: chk ver
       debug:
         msg:
@@ -137,6 +137,33 @@
     - name: Extract patch data
       command: tar -xzf postgresql-{{ latestver.stdout[1:] }}.tar.gz
       when: "'RedHat' in ansible_distribution"
+    
+    # - name: Prerequisite --- create directory installer
+    #   command: mkdir /var/lib/develkit
+
+    # - name: Download files from Apache server
+    #   get_url:
+    #     url: "{{ item }}"
+    #     dest: /var/lib/develkit
+    #     mode: '0644'
+    #   loop:
+    #     - http://172.19.2.98/patches/develkit/cpp-11.4.1-3.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/gcc-11.4.1-3.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/glibc-devel-2.34-28.el9_0.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/glibc-headers-2.34-28.el9_0.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/kernel-headers-5.14.0-427.37.1.el9_4.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/libgcc-11.4.1-3.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/libgomp-11.4.1-3.el9.x86_64.rpm 
+    #     - http://172.19.2.98/patches/develkit/libmpc-1.2.1-4.el9.x86_64.rpm  
+    #     - http://172.19.2.98/patches/develkit/libxcrypt-devel-4.4.18-3.el9.x86_64.rpm 
+    #     - http://172.19.2.98/patches/develkit/make-4.3-8.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/ncurses-c++-libs-6.2-8.20210508.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/ncurses-devel-6.2-8.20210508.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/readline-devel-8.1-4.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/zlib-1.2.11-40.el9.x86_64.rpm
+    #     - http://172.19.2.98/patches/develkit/zlib-devel-1.2.11-40.el9.x86_64.rpm
+
+    #   register: download_results
 
     - name: install devel kit
       command: sudo yum install gcc readline-devel zlib-devel -y
@@ -177,7 +204,7 @@
     #   when: "'RedHat' in ansible_distribution"
     
     - name: Start old svc   (linux)
-      shell: sudo -u postgres pg_ctl start -D {{ datadirlnx }}
+      shell: sudo -u postgres {{basedirlnx}}/pg_ctl start -D {{ datadirlnx }}
       register: chk3
       args:
         chdir: "{{ basedirlnx }}"
