@@ -5,6 +5,8 @@
   vars:   
     - mysqlpatch: http://172.19.2.98/patches/mysql-8.0.39-winx64.zip
     - userdir: "C:\\Users\\Administrator\\"
+    - patchname: mysql-8.0.39-winx64.zip
+    - patchfolder: mysql-8.0.39-winx64
 
   tasks:
     - name: Gather system facts
@@ -57,6 +59,7 @@
     #     $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
     #     [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
     #   when: "'Windows' in ansible_distribution"
+
    
     # - name: Backup MySQL databases with mysqldump using defaults file
     #   ansible.builtin.win_shell: |
@@ -81,31 +84,50 @@
         msg: "The service name is: {{ service_name }}"
       when: "'Windows' in ansible_distribution"
 
-    - name: Download MySQL Patch
-      win_get_url:
-        url: '{{ mysqlpatch }}'
-        dest: "{{ userdir }}"
-      when: "'Windows' in ansible_distribution"
+    # - name: Download MySQL Patch
+    #   win_get_url:
+    #     url: '{{ mysqlpatch }}'
+    #     dest: "{{ userdir }}"
+    #   when: "'Windows' in ansible_distribution"
+      
+    # - name: Unzip MySQL 8.0.39
+    #   win_unzip:
+    #     src: "{{ userdir }}\\{{ patchname }}"
+    #     dest: "{{ userdir }}\\mysqlnew"
+    #     remote_src: yes
 
+   
     # - name: Stop Svc
     #   ansible.builtin.win_command: |
     #     net stop {{ service_name }}
 
-    
 
+    - name: Replace existing MySQL files
+      ansible.windows.win_copy:
+        src:  "{{ userdir }}mysqlnew\\{{ patchfolder }}\\"
+        dest: C:\Program Files\MySQL\MySQL Server 8.0\
+        remote_src: yes
+        force: yes
 
+    - name: Run MySQL upgrade
+      ansible.windows.win_command:
+        cmd: .\mysql_upgrade --defaults-file="{{ userdir }}.my.cnf"
+      args:
+        chdir: "{{ binloc }}/bin" 
+      register: upgrade_output
 
-    # - name: Create Backup
-    #   ansible.builtin.win_command: 
-    #     # cmd:  mysql --version
-    #     cmd: mysqldump --defaults-file=.my.cnf --all-databases > alldatabases_backup.sql
-    #     chdir: "{{ binloc }}/bin"            
-    #   register: chkbak
-    #   when: "'Windows' in ansible_distribution"
-    # - name: chkrun
-    #   debug:
-    #     var: chkbak
-    #   when: "'Windows' in ansible_distribution"
+    - name: Output upgrade results
+      debug:
+        var: upgrade_output.stdout_lines
+
+    - name: start Svc
+      ansible.builtin.win_command: |
+        net start {{ service_name }}
+
+    - name: Clean up temporary files
+      ansible.windows.win_file:
+        path: "{{ userdir }}\\{{ patchname }}"
+        state: absent
 
     # - name: Display the PostgreSQL port
     #   debug:
