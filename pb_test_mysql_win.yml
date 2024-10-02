@@ -49,24 +49,24 @@
         var: binloc
       when: "'Windows' in ansible_distribution"
 
-    # - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell
-    #   ansible.builtin.win_shell: |
-    #     $content = @"
-    #     [client]
-    #     user=root
-    #     password=Welcome123..
-    #     "@
-    #     $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
-    #     [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
-    #   when: "'Windows' in ansible_distribution"
+    - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell
+      ansible.builtin.win_shell: |
+        $content = @"
+        [client]
+        user=root
+        password=Welcome123..
+        "@
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+        [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
+      when: "'Windows' in ansible_distribution"
 
    
-    # - name: Backup MySQL databases with mysqldump using defaults file
-    #   ansible.builtin.win_shell: |
-    #     .\mysqldump --defaults-file="{{ userdir }}.my.cnf" --all-databases > {{ userdir }}alldatabases_backup.sql
-    #   args:
-    #     chdir: "{{ binloc }}/bin" 
-    #   when: "'Windows' in ansible_distribution"
+    - name: Backup MySQL databases with mysqldump using defaults file
+      ansible.builtin.win_shell: |
+        .\mysqldump --defaults-file="{{ userdir }}.my.cnf" --all-databases > {{ userdir }}alldatabases_backup.sql
+      args:
+        chdir: "{{ binloc }}/bin" 
+      when: "'Windows' in ansible_distribution"
 
     - name: Find MySQL services using sc query
       ansible.builtin.win_shell: |
@@ -84,22 +84,24 @@
         msg: "The service name is: {{ service_name }}"
       when: "'Windows' in ansible_distribution"
 
-    # - name: Download MySQL Patch
-    #   win_get_url:
-    #     url: '{{ mysqlpatch }}'
-    #     dest: "{{ userdir }}"
-    #   when: "'Windows' in ansible_distribution"
+    - name: Download MySQL Patch
+      win_get_url:
+        url: '{{ mysqlpatch }}'
+        dest: "{{ userdir }}"
+      when: "'Windows' in ansible_distribution"
       
-    # - name: Unzip MySQL 8.0.39
-    #   win_unzip:
-    #     src: "{{ userdir }}\\{{ patchname }}"
-    #     dest: "{{ userdir }}\\mysqlnew"
-    #     remote_src: yes
+    - name: Unzip MySQL 8.0.39
+      win_unzip:
+        src: "{{ userdir }}\\{{ patchname }}"
+        dest: "{{ userdir }}\\mysqlnew"
+        remote_src: yes
 
    
-    # - name: Stop Svc
-    #   ansible.builtin.win_command: |
-    #     net stop {{ service_name }}
+   
+    - name: Stop MySQL service
+      ansible.windows.win_service:
+        name: "{{ service_name }}"
+        state: stopped
 
 
     - name: Replace existing MySQL files
@@ -120,137 +122,52 @@
       debug:
         var: upgrade_output.stdout_lines
 
-    - name: start Svc
-      ansible.builtin.win_command: |
-        net start {{ service_name }}
+    - name: Start MySQL service
+      ansible.windows.win_service:
+        name: "{{ service_name }}"
+        state: started
+      ignore_errors: true
+
+
 
     - name: Clean up temporary files
       ansible.windows.win_file:
         path: "{{ userdir }}\\{{ patchname }}"
         state: absent
 
-    # - name: Display the PostgreSQL port
-    #   debug:
-    #     msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
-    #   when: "'Windows' in ansible_distribution"
+    - name: get installedver
+      ansible.windows.win_command:
+        cmd: .\mysql  --defaults-file=C:\Users\Administrator\.my.cnf -e "SELECT VERSION();"
+      args:
+        chdir: "{{ binloc }}/bin" 
+      register: installedver
 
-    # - name: Execute SQL command to get PostgreSQL port
-    #   win_shell: |
-    #     $env:PGPASSWORD = "P@ssw0rdnh2"
-    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
-    #   become: yes
-    #   become_method: runas
-    #   become_user: postgres
-    #   register: postgremode
-    #   when: "'Windows' in ansible_distribution"
+   
+
+    - name: Display Installed version
+      debug:
+        msg: "{{ installedver.stdout  }}"
+      when: "'Windows' in ansible_distribution"
+    - name: Remove 'VERSION()' and '\r\n' from the string
+      set_fact:
+        clean_version: "{{ installedver.stdout | regex_replace('VERSION\\(\\)\\r\\n', '') | regex_replace('\\r\\n', '') }}"
     
-    # - name: Set mode (windows)
-    #   set_fact:
-    #     psqlmode: 'standalone'
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "postgremode.stdout != 't'" 
+    - name: Set MySQL Version in Registry
+      ansible.windows.win_shell: |
+        # Define the registry path based on your installation type
+        $mysqlRegistryPath = 'HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation.sub_keys[0] }}'  # Use this for 64-bit MySQL
 
-    # - name: Set fact port  (windows)
-    #   set_fact:
-    #     portpsql: "{{ postgres_port.stdout.strip() }}"
-    #   when: "'Windows' in ansible_distribution"
-       
-    
+        # Set the new version value
+        $newVersion = '{{ clean_version }}'
 
-    # # - name: Check latest version (above ver 10 windows)
-    # #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+' | sort -V | tail -1
-    # #   register: latestver
-    # #   when: 
-    # #     - "'Windows' in ansible_distribution"
-    # #     - "installedver | int >= 11"
-        
-    # # - name: Check latest version (above ver 10 windows)
-    # #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
-    # #   register: latestverold
-    # #   when: 
-    # #     - "'Windows' in ansible_distribution"
-    # #     - "installedver | int < 11"
-    # - name: Check Version
-    #   win_shell: |
-    #       # Ensure PowerShell uses TLS 1.2
-    #       [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        # Update the Version key in the registry
+        Set-ItemProperty -Path $mysqlRegistryPath -Name 'Version' -Value $newVersion
 
-    #       # Alternatively, use TLS 1.3 if supported
-    #       # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
+        # Verify the change
+        Get-ItemProperty -Path $mysqlRegistryPath | Select-Object Version
 
-    #       # Now run your Invoke-WebRequest command
-    #       $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
-
-    #       # Extract version numbers that match "v15.x.x"
-    #       $versions = $response.Content -split "`n" | ForEach-Object {
-    #           if ($_ -match 'v{{ installedver }}\.[0-9]+') {
-    #               $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
-    #               if ($matches.Success) {
-    #                   $matches.Value
-    #               }
-    #           }
-    #       }
-
-    #       # Sort the versions and select the latest one
-    #       $latest_version = $versions | Sort-Object | Select-Object -Last 1
-
-    #       # Display the latest version
-    #       $latest_version
-    #   register: latestver
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: check latest version  (windows)
-    #   debug:
-    #     var: latestver.stdout[1:-2]
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Set updateflag
-    #   set_fact:
-    #     needupdates: y
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "installedver != latestver.stdout[1:-2]"
-
-    
-    
-
-      
-    
-
-    # # - name: Stop PostgreSQL 15 service (windows)
-    # #   win_service:
-    # #     name: "{{ serviceid }}"
-    # #     state: stopped
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Backup PostgreSQL data directory (windows)
-    # #   win_command: >
-    # #     powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Download PostgreSQL 16 installer (windows)
-    # #   win_get_url:
-    # #     url: "{{ urlpatch }}"
-    # #     dest: C:\{{ installername }}
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Install PostgreSQL 15 (windows)
-    # #   win_command: >
-    # #     powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
-    # #   register: install_output
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Print install output (windows)
-    # #   debug:
-    # #     var: install_output
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Start PostgreSQL 15 service (windows)
-    # #   win_service:
-    # #     name: "{{ serviceid }}"
-    # #     state: started
-    # #   when: "'Windows' in ansible_distribution"
+   
+   
 
 
     
