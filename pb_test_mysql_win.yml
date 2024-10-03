@@ -3,11 +3,11 @@
   name: System Discovery
 
   vars:   
-    - mysqlpatch: http://172.19.2.98/patches/mysql-8.0.39-winx64.zip
+    - mysqlpatch: http://172.19.2.98/patches/mysql-8.0.39-winx64.msi
     - userdir: "C:\\Users\\Administrator\\"
-    - patchname: mysql-8.0.39-winx64.zip
+    - patchname: mysql-8.0.39-winx64.msi
     - patchfolder: mysql-8.0.39-winx64
-
+    - productid: MySQL Server 8.0.39
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -89,82 +89,137 @@
         url: '{{ mysqlpatch }}'
         dest: "{{ userdir }}"
       when: "'Windows' in ansible_distribution"
-      
-    - name: Unzip MySQL 8.0.39
-      win_unzip:
-        src: "{{ userdir }}\\{{ patchname }}"
-        dest: "{{ userdir }}\\mysqlnew"
-        remote_src: yes
 
-   
-   
-    - name: Stop MySQL service
-      ansible.windows.win_service:
-        name: "{{ service_name }}"
-        state: stopped
-
-
-    - name: Replace existing MySQL files
-      ansible.windows.win_copy:
-        src:  "{{ userdir }}mysqlnew\\{{ patchfolder }}\\"
-        dest: C:\Program Files\MySQL\MySQL Server 8.0\
-        remote_src: yes
-        force: yes
-
-    - name: Run MySQL upgrade
-      ansible.windows.win_command:
-        cmd: .\mysql_upgrade --defaults-file="{{ userdir }}.my.cnf"
+    - name: Install MySQL using MSI
+      win_package:
+        path: "{{ userdir }}{{ patchname }}"  # Replace with the actual path to the MSI file
+        product_id: "{{ productid }}"
+        state: present
+        arguments: /quiet INSTALLDIR="{{ binloc }}"  # Adjust the install directory as needed
+      register: rslt
+    - name: resultins
+      debug:
+        msg: "{{ rslt }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Run mysqlcheck to verify database tables
+      win_command: >
+        .\mysqlcheck --defaults-file="{{ userdir }}.my.cnf" --all-databases
+      register: mysqlcheck_result
       args:
         chdir: "{{ binloc }}/bin" 
-      register: upgrade_output
+      ignore_errors: yes  # Allow the playbook to continue even if an error occurs
 
-    - name: Output upgrade results
+    - name: Output mysqlcheck results
       debug:
-        var: upgrade_output.stdout_lines
+        msg: "{{ mysqlcheck_result }}"
 
-    - name: Start MySQL service
-      ansible.windows.win_service:
-        name: "{{ service_name }}"
-        state: started
-      ignore_errors: true
+    - name: Check for tables that are not OK
+      set_fact:
+        tables_not_ok: "{{ mysqlcheck_result.stdout_lines | select('search', '^(?!.*OK$).*') | list }}"
 
+    - name: Fail if there are tables that are not OK
+      fail:
+        msg: "The following tables are not OK: {{ tables_not_ok }}"
+      when: tables_not_ok | length > 0
 
+    - name: Debug to show which tables are OK and not OK (for troubleshooting)
+      debug:
+        msg: "Checked MySQL tables: {{ mysqlcheck_result.stdout_lines }}"
 
-    - name: Clean up temporary files
+    - name: Clean up installer
       ansible.windows.win_file:
         path: "{{ userdir }}\\{{ patchname }}"
         state: absent
 
-    - name: get installedver
-      ansible.windows.win_command:
-        cmd: .\mysql  --defaults-file=C:\Users\Administrator\.my.cnf -e "SELECT VERSION();"
-      args:
-        chdir: "{{ binloc }}/bin" 
-      register: installedver
+    - name: removebak if success
+      ansible.windows.win_file:
+          path: "{{ userdir }}alldatabases_backup.sql"
+          state: absent
+      when: tables_not_ok | length == 0
+
+    - name: remove cnf if success
+      ansible.windows.win_file:
+          path: "{{ userdir }}.my.cnf"
+          state: absent
+      when: tables_not_ok | length == 0
+
+    
+
+    # zip method  
+    # - name: Unzip MySQL 8.0.39
+    #   win_unzip:
+    #     src: "{{ userdir }}\\{{ patchname }}"
+    #     dest: "{{ userdir }}\\mysqlnew"
+    #     remote_src: yes
 
    
+   
+    # - name: Stop MySQL service
+    #   ansible.windows.win_service:
+    #     name: "{{ service_name }}"
+    #     state: stopped
 
-    - name: Display Installed version
-      debug:
-        msg: "{{ installedver.stdout  }}"
-      when: "'Windows' in ansible_distribution"
-    - name: Remove 'VERSION()' and '\r\n' from the string
-      set_fact:
-        clean_version: "{{ installedver.stdout | regex_replace('VERSION\\(\\)\\r\\n', '') | regex_replace('\\r\\n', '') }}"
+
+    # - name: Replace existing MySQL files
+    #   ansible.windows.win_copy:
+    #     src:  "{{ userdir }}mysqlnew\\{{ patchfolder }}\\"
+    #     dest: C:\Program Files\MySQL\MySQL Server 8.0\
+    #     remote_src: yes
+    #     force: yes
+
+    # - name: Run MySQL upgrade
+    #   ansible.windows.win_command:
+    #     cmd: .\mysql_upgrade --defaults-file="{{ userdir }}.my.cnf"
+    #   args:
+    #     chdir: "{{ binloc }}/bin" 
+    #   register: upgrade_output
+
+    # - name: Output upgrade results
+    #   debug:
+    #     var: upgrade_output.stdout_lines
+
+    # - name: Start MySQL service
+    #   ansible.windows.win_service:
+    #     name: "{{ service_name }}"
+    #     state: started
+    #   ignore_errors: true
+
+
+
+    # - name: Clean up temporary files
+    #   ansible.windows.win_file:
+    #     path: "{{ userdir }}\\{{ patchname }}"
+    #     state: absent
+
+    # - name: get installedver
+    #   ansible.windows.win_command:
+    #     cmd: .\mysql  --defaults-file=C:\Users\Administrator\.my.cnf -e "SELECT VERSION();"
+    #   args:
+    #     chdir: "{{ binloc }}/bin" 
+    #   register: installedver
+
+    # - name: Display Installed version
+    #   debug:
+    #     msg: "{{ installedver.stdout  }}"
+    #   when: "'Windows' in ansible_distribution"
+    # - name: Remove 'VERSION()' and '\r\n' from the string
+    #   set_fact:
+    #     clean_version: "{{ installedver.stdout | regex_replace('VERSION\\(\\)\\r\\n', '') | regex_replace('\\r\\n', '') }}"
     
-    - name: Set MySQL Version in Registry
-      ansible.windows.win_shell: |
-        # Define the registry path based on your installation type
-        $mysqlRegistryPath = 'HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation.sub_keys[0] }}'  # Use this for 64-bit MySQL
+    # - name: Set MySQL Version in Registry
+    #   ansible.windows.win_shell: |
+    #     # Define the registry path based on your installation type
+    #     $mysqlRegistryPath = 'HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation.sub_keys[0] }}'  # Use this for 64-bit MySQL
 
-        # Set the new version value
-        $newVersion = '{{ clean_version }}'
+    #     # Set the new version value
+    #     $newVersion = '{{ clean_version }}'
 
-        # Update the Version key in the registry
-        Set-ItemProperty -Path $mysqlRegistryPath -Name 'Version' -Value $newVersion
+    #     # Update the Version key in the registry
+    #     Set-ItemProperty -Path $mysqlRegistryPath -Name 'Version' -Value $newVersion
 
-        # Verify the change
-        Get-ItemProperty -Path $mysqlRegistryPath | Select-Object Version
+    #     # Verify the change
+    #     Get-ItemProperty -Path $mysqlRegistryPath | Select-Object Version
 
    
    
