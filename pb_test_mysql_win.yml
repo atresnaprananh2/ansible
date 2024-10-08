@@ -1,8 +1,9 @@
-- hosts: winmysql
+- hosts: winmysql #change to all when testing on SA
   gather_facts: yes
   name: System Discovery
 
   vars:   
+    #change the patch information if needed
     - mysqlpatch: http://172.19.2.98/patches/mysql-8.0.39-winx64.msi
     - userdir: "C:\\Users\\Administrator\\"
     - patchname: mysql-8.0.39-winx64.msi
@@ -49,7 +50,7 @@
         var: binloc
       when: "'Windows' in ansible_distribution"
 
-    - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell
+    - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
       ansible.builtin.win_shell: |
         $content = @"
         [client]

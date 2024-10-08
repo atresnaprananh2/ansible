@@ -169,7 +169,7 @@
         import json
         ts = pytwist.twistserver.TwistServer()
         try:
-            ts.authenticate("aditya", "Nh2server!")
+            ts.authenticate("aditya", "S@ndriel17")
             server_service = ts.server.ServerService
             filter = Filter()
             server_refs = server_service.findServerRefs(filter)

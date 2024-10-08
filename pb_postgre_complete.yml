@@ -1,8 +1,8 @@
-- hosts: postgreold
-  remote_user: root
-  become: true
-  become_user: root
-  gather_facts: yes
+- hosts: all
+  # remote_user: root
+  # become: true
+  # become_user: root
+  # gather_facts: yes
   name: System Discovery
   vars:
     installername: postgresqlinstall.exe
@@ -54,11 +54,11 @@
         basedirpg: "{{ basedirlnx[:-5] }}"
       when: "'RedHat' in ansible_distribution"
      
-    - name: chk basedir
-      debug:
-        msg: "{{ basedirpg }}"
-      when: 
-        - "'Windows' not in ansible_distribution"
+    # - name: chk basedir
+    #   debug:
+    #     msg: "{{ basedirpg }}"
+    #   when: 
+    #     - "'Windows' not in ansible_distribution"
 
   
     - name: Find the path of postgre data  (linux)
@@ -174,6 +174,7 @@
       register: chk2
       args:
         chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
+      when: "'RedHat' in ansible_distribution"
 
     - name: make file 
       command: make

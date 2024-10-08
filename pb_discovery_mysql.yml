@@ -1,4 +1,4 @@
-- hosts: mysqlrhel2
+- hosts: mysqlrhel
   gather_facts: yes
   name: System Discovery
   remote_user: root #remove when running on SA Client
@@ -9,6 +9,8 @@
     psqlmode: 'HA-Standby'
     mysql_user: 'student'
     mysql_password: 'Automation@123'
+  environment:
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/local/mysql/bin"
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -31,18 +33,36 @@
     
    
     - name: Check MySQL installation
-      command: which mysql
-      # environment:
-      #   PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/path/to/mysql/bin"
+      shell:  which mysql
+
+     
       register: mysql_path
       ignore_errors: yes
+    
+   
+    
+    # - name: Resolve the real path of mysql  (linux)
+    #   command: readlink -f "{{ mysql_path.stdout }}"
+    #   register: binpathmysql
+    #   args:
+    #     chdir: '/var/lib'
+    #   when: "'RedHat' in ansible_distribution"
     
     - name: chk1
       debug:
         var: mysql_path
       when: "'RedHat' in ansible_distribution"
 
-       
+    - name: get mysql service name
+      shell: ls /etc/init.d/ | grep mysql
+
+      register: mysqlsvc
+    
+    - name: chk1
+      debug:
+        var: mysqlsvc
+      when: "'RedHat' in ansible_distribution"
+     
     
     # - name: Find the path of mysql  (linux)
     #   shell: which mysql
@@ -51,12 +71,7 @@
     #     chdir: '/var/lib'
     #   when: "'RedHat' in ansible_distribution"
 
-    # - name: Resolve the real path of mysql  (linux)
-    #   command: readlink -f "{{ mysql_path.stdout }}"
-    #   register: binpathmysql
-    #   args:
-    #     chdir: '/var/lib'
-    #   when: "'RedHat' in ansible_distribution"
+   
 
     # - name: Set fact base dir (linux)
     #   set_fact:
