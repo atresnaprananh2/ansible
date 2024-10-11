@@ -1,14 +1,14 @@
-- hosts: winmysql
+- hosts: winmysql #change with all for SA
   gather_facts: yes
   name: System Discovery
   remote_user: Administrator #remove when running on SA Client
   become: true #remove when running on SA Client
   become_user: Administrator #remove when running on SA Client
   vars:   
-    needupdates: n
-    psqlmode: 'HA-Standby'
-    mysql_user: 'student'
-    mysql_password: 'Automation@123'
+    - userdir: "C:\\Users\\Administrator\\"
+    - mysql_installation: {}
+    - mysql_installation_2: {}
+
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -24,139 +24,192 @@
         msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts.ip_addresses[1] }}"
       when: "'Windows' in ansible_distribution"
 
-    
-
-    
-
     #Windows Host Script
+    - name: Validate if WOW6432Node registry key exists for Adobe Acrobat Reader
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
+        state: present
+      register: registry_check
 
-    - name: Get MySQL installation base directory from registry (windows)
+    - name: Output registry check result
+      debug:
+        var: registry_check.exists
+   
+
+    - name: Get MySQL installation base directory from registry (windows x64)
       win_reg_stat:
         path: HKLM:\SOFTWARE\MySQL AB
-      register: mysql_installation
-      when: "'Windows' in ansible_distribution"
-    - name: Get MySQL installation base directory from registry down by 1 level (windows)
+      register: mysql_installation64
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+
+   
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x64)
       win_reg_stat:
-        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation.sub_keys[0] }}
-      register: mysql_installation_2
-      when: "'Windows' in ansible_distribution"
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[0] }}
+      register: mysql_installation_264
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
 
-    # - name: Get the first installation ID (windows)
-    #   set_fact:
-    #     installation_id: "{{ postgres_installations.sub_keys[0] }}"
-    #   when: "'Windows' in ansible_distribution"
+    - name: Get MySQL installation base directory from registry (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB
+      register: mysql_installation86
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB\{{ mysql_installation86.sub_keys[0] }}
+      register: mysql_installation_286
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
 
-    # - name: Retrieve installation directory (windows)
-    #   win_reg_stat:
-    #     path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
-    #   register: postgres_installation_dir2
-    #   when: "'Windows' in ansible_distribution"
+    - name: set path x64
+      set_fact:
+        mysql_installation: "{{ mysql_installation64 }}"
+        mysql_installation_2: "{{ mysql_installation_264 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists" 
+
+    - name: set path x86
+      set_fact:
+        mysql_installation: "{{ mysql_installation86 }}"
+        mysql_installation_2: "{{ mysql_installation_286 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+
+    - name: Run wmic to get disk size and free space in bytes
+      win_shell: |
+        wmic logicaldisk where "DeviceID='C:'" get Size,FreeSpace /format:value   
+      register: disk_info
+    - name: Extract FreeSpace and Size values safely
+      set_fact:
+        free_space_raw: "{{ disk_info.stdout | regex_search('FreeSpace=([0-9]+)', '\\1') }}"
+        size_raw: "{{ disk_info.stdout | regex_search('Size=([0-9]+)', '\\1') }}"
+
+    - name: Clean and convert FreeSpace and Size to integers
+      set_fact:
+        free_space: "{{ free_space_raw | default('0') | regex_replace('\\D', '') | int }}"
+        size: "{{ size_raw | default('0') | regex_replace('\\D', '') | int }}"
+
+    - name: Convert FreeSpace and Size to GB
+      set_fact:
+        free_space_gb: "{{ free_space | float / 1024 / 1024 / 1024 | round(2) }}"
+        size_gb: "{{ size | float / 1024 / 1024 / 1024 | round(2) }}"
+
+    - name: Display FreeSpace and Size in GB
+      debug:
+        msg: "FreeSpace: {{ free_space_gb | float |round(2) }} GB, Size: {{ size_gb | float | round(2) }} GB"
+
+    - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
+      ansible.builtin.win_shell: |
+        $content = @"
+        [client]
+        user=root
+        password=Welcome123..
+        "@
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+        [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
+    
+   
 
     - name: Set fact base dir (windows)
       set_fact:
-        
-        dataloc: "{{ mysql_installation_2.properties['DataLocation']['value']  }}"
+        totalspace: "{{ size_gb | float | round(2) }}"
+        freespace: "{{ free_space_gb | float |round(2) }}"
         binloc: "{{ mysql_installation_2.properties['Location']['value'][:-1]  }}"
         mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
-    - name: Display the PostgreSQL port
+    
+    - name: dataloctest
       debug:
-        var: binloc
+        msg: "{{ mysql_installation_2 }}"
       when: "'Windows' in ansible_distribution"
 
-    #   when: "'Windows' in ansible_distribution"
+    - name: Check MySQL Data Directory
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SHOW VARIABLES LIKE 'datadir';"
+      register: mysql_datadir
+      args:
+        chdir: "{{ binloc }}/bin" 
+      ignore_errors: yes
 
-    # - name: Execute SQL command to get PostgreSQL port
-    #   win_shell: |
-    #     $env:PGPASSWORD = "P@ssw0rdnh2"
-    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "SHOW port;" -t
-    #   become: yes
-    #   become_method: runas
-    #   become_user: postgres
-    #   register: postgres_port
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Display the PostgreSQL port
-    #   debug:
-    #     msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Execute SQL command to get PostgreSQL port
-    #   win_shell: |
-    #     $env:PGPASSWORD = "P@ssw0rdnh2"
-    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
-    #   become: yes
-    #   become_method: runas
-    #   become_user: postgres
-    #   register: postgremode
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: Set mode (windows)
-    #   set_fact:
-    #     psqlmode: 'standalone'
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "postgremode.stdout != 't'" 
-
-    # - name: Set fact port  (windows)
-    #   set_fact:
-    #     portpsql: "{{ postgres_port.stdout.strip() }}"
-    #   when: "'Windows' in ansible_distribution"
-       
     
 
-    # # - name: Check latest version (above ver 10 windows)
-    # #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+' | sort -V | tail -1
-    # #   register: latestver
-    # #   when: 
-    # #     - "'Windows' in ansible_distribution"
-    # #     - "installedver | int >= 11"
-        
-    # # - name: Check latest version (above ver 10 windows)
-    # #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
-    # #   register: latestverold
-    # #   when: 
-    # #     - "'Windows' in ansible_distribution"
-    # #     - "installedver | int < 11"
-    # - name: Check Version
-    #   win_shell: |
-    #       # Ensure PowerShell uses TLS 1.2
-    #       [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  
 
-    #       # Alternatively, use TLS 1.3 if supported
-    #       # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
+    - name: Extract and Clean Data Directory
+      set_fact:
+        dataloc: "{{ mysql_datadir.stdout_lines[1] | regex_replace('^datadir\\s+', '') | regex_replace('\\\\\\\\', '\\\\') | regex_replace('\\\\$', '') }}"
 
-    #       # Now run your Invoke-WebRequest command
-    #       $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
-
-    #       # Extract version numbers that match "v15.x.x"
-    #       $versions = $response.Content -split "`n" | ForEach-Object {
-    #           if ($_ -match 'v{{ installedver }}\.[0-9]+') {
-    #               $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
-    #               if ($matches.Success) {
-    #                   $matches.Value
-    #               }
-    #           }
-    #       }
-
-    #       # Sort the versions and select the latest one
-    #       $latest_version = $versions | Sort-Object | Select-Object -Last 1
-
-    #       # Display the latest version
-    #       $latest_version
-    #   register: latestver
-    #   when: "'Windows' in ansible_distribution"
+    - name: Display Cleaned MySQL Data Directory
+      debug:
+        msg: "MySQL Data Directory: {{ dataloc }}"
+   
     
-    # - name: check latest version  (windows)
-    #   debug:
-    #     var: latestver.stdout[1:-2]
-    #   when: "'Windows' in ansible_distribution"
+    - name: Execute MySQL command to get database size
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"
+      args:
+        chdir: "{{ binloc }}/bin" 
+      register: mysql_size_output
+    
+    - name: Extract only the numeric value from the output
+      set_fact:
+        mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
 
-    # - name: Set updateflag
-    #   set_fact:
-    #     needupdates: y
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "installedver != latestver.stdout[1:-2]"
+    - name: Display the extracted MySQL database size
+      debug:
+        msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Get MySQL Port
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SHOW VARIABLES LIKE 'port';"
+      register: mysql_port
+      args:
+        chdir: "{{ binloc }}/bin" 
+      ignore_errors: yes
+
+    - name: Debug raw output of MySQL port
+      debug:
+        var: mysql_port.stdout_lines[1]
+
+    - name: Extract MySQL Port
+      set_fact:
+        mysql_port_number: "{{ mysql_port.stdout_lines[1] | regex_search('port\\s+(\\d+)', '\\1') }}"
+
+    - name: Check MySQL Primary Databases
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SHOW DATABASES;"
+      register: mysql_databases
+      ignore_errors: yes
+      args:
+        chdir: "{{ binloc }}/bin" 
+
+    - name: Debug raw output of databases
+      debug:
+        var: mysql_databases.stdout
+
+    - name: Extract Primary Databases
+      set_fact:
+        primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
+
+    - name: Display MySQL Port
+      debug:
+        msg: "MySQL Port: {{ mysql_port_number[0] }}"
+
+    - name: Display Primary Databases
+      debug:
+        msg: "Primary Databases: {{ primary_databases[0] }}"
+
 
     - name: Create a temporary Python script file
       win_shell: |
@@ -178,7 +231,7 @@
                 if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'mysql_version':'{{ mysqlversion }}', 'datadir': '{{ dataloc }}','databaseplatform': 'MySQL', 'Home':'{{ binloc }}'}
+                        CAMap = {'MySQL_Port':'{{ mysql_port_number[0] }}', 'MySQL_PrimaryDB':'{{ primary_databases[0] }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

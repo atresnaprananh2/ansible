@@ -138,6 +138,7 @@
       command: tar -xzf postgresql-{{ latestver.stdout[1:] }}.tar.gz
       when: "'RedHat' in ansible_distribution"
     
+    #try to set up local repo 
     # - name: Prerequisite --- create directory installer
     #   command: mkdir /var/lib/develkit
 

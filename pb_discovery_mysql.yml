@@ -9,8 +9,7 @@
     psqlmode: 'HA-Standby'
     mysql_user: 'student'
     mysql_password: 'Automation@123'
-  environment:
-    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/local/mysql/bin"
+ 
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:

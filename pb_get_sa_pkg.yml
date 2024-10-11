@@ -1,0 +1,31 @@
+- hosts: postgre #change with all for SA
+  gather_facts: yes
+  name: Download a package from SA.
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
+  vars:
+    - ansible_python_interpreter: /opt/opsware/agent/bin/./python3
+    - download_location: /root
+    - package_name: "chef-12.8.1-1.el7.x86_64.rpm"
+    - package_id: "6210001"
+  tasks:
+    - name: Parameter validation
+      ansible.builtin.assert:
+        that:
+          - package_id is defined
+          - package_name is defined
+          - download_location is defined
+
+    - name: run python to download from SA
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{package_id}},None,None,'{{package_name}}', None, '{{download_location}}'))
+      register: test
+    - name: Output check result
+      debug:
+        var: test
+

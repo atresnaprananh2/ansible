@@ -9,6 +9,9 @@
     - patchname: mysql-8.0.39-winx64.msi
     - patchfolder: mysql-8.0.39-winx64
     - productid: MySQL Server 8.0.39
+    - mysql_installation_2: {}
+    - mysql_installation: {}
+
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -26,16 +29,66 @@
 
     #Windows Host Script
 
-    - name: Get MySQL installation base directory from registry (windows)
+    - name: Validate if WOW6432Node registry key exists for Adobe Acrobat Reader
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
+        state: present
+      register: registry_check
+
+    - name: Output registry check result
+      debug:
+        var: registry_check.exists
+   
+
+    - name: Get MySQL installation base directory from registry (windows x64)
       win_reg_stat:
         path: HKLM:\SOFTWARE\MySQL AB
-      register: mysql_installation
-      when: "'Windows' in ansible_distribution"
-    - name: Get MySQL installation base directory from registry down by 1 level (windows)
+      register: mysql_installation64
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+
+   
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x64)
       win_reg_stat:
-        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation.sub_keys[0] }}
-      register: mysql_installation_2
-      when: "'Windows' in ansible_distribution"
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[0] }}
+      register: mysql_installation_264
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+
+    - name: Get MySQL installation base directory from registry (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB
+      register: mysql_installation86
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB\{{ mysql_installation86.sub_keys[0] }}
+      register: mysql_installation_286
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+
+    - name: set path x64
+      set_fact:
+        mysql_installation: "{{ mysql_installation64 }}"
+        mysql_installation_2: "{{ mysql_installation_264 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists" 
+
+    - name: set path x86
+      set_fact:
+        mysql_installation: "{{ mysql_installation86 }}"
+        mysql_installation_2: "{{ mysql_installation_286 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
 
 
     - name: Set fact base dir (windows)
