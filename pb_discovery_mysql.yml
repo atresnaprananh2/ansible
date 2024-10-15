@@ -29,23 +29,20 @@
     - name: Gather installed package facts (linux)
       ansible.builtin.package_facts:
       when: "'Windows' not in ansible_distribution"
-    
-   
-    - name: Check MySQL installation
-      shell:  which mysql
 
-     
+
+    - name: Check MySQL installation
+      shell: ". /etc/profile && which mysql"
       register: mysql_path
       ignore_errors: yes
+      when: "'RedHat' in ansible_distribution"
     
-   
-    
-    # - name: Resolve the real path of mysql  (linux)
-    #   command: readlink -f "{{ mysql_path.stdout }}"
-    #   register: binpathmysql
-    #   args:
-    #     chdir: '/var/lib'
-    #   when: "'RedHat' in ansible_distribution"
+    - name: Resolve the real path of mysql  (linux)
+      command: readlink -f "{{ mysql_path.stdout }}"
+      register: mysql_path
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
     
     - name: chk1
       debug:
@@ -53,65 +50,48 @@
       when: "'RedHat' in ansible_distribution"
 
     - name: get mysql service name
-      shell: ls /etc/init.d/ | grep mysql
+      shell: systemctl list-units --type=service | grep mysql | cut -d '.' -f1
 
-      register: mysqlsvc
+      register: datadir
+      when: "'RedHat' in ansible_distribution"
     
     - name: chk1
+      debug:
+        var: datadir
+      when: "'RedHat' in ansible_distribution"
+
+    - name: get datadir
+      shell: sudo grep -i 'datadir' /etc/my.cnf
+
+      register: mysqlsvc
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk2
       debug:
         var: mysqlsvc
       when: "'RedHat' in ansible_distribution"
      
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ mysql_path.stdout[:-4] }}"
+      
+      when: "'RedHat' in ansible_distribution"
     
-    # - name: Find the path of mysql  (linux)
-    #   shell: which mysql
-    #   register: mysql_path
-    #   args:
-    #     chdir: '/var/lib'
-    #   when: "'RedHat' in ansible_distribution"
-
+    - name: Get Installed Version  (linux)
+      command: mysql --version
+      register: mysqlversion
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: "'RedHat' in ansible_distribution"
    
-
-    # - name: Set fact base dir (linux)
-    #   set_fact:
-    #     basedirlnx: "{{ binpathmysql.stdout[:-4] }}"
+    - name: Get Port
+      command:  ss -ltnp | grep mysql
+      register: mysqlversion
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: "'RedHat' in ansible_distribution"
       
-    #   when: "'RedHat' in ansible_distribution"
-
-  
-    # - name: Find the path of mysql data  (linux)
-    #   command: grep datadir /etc/my.cnf
-    #   register: mysqldatadir
-    #   args:
-    #     chdir: '/var/lib'
-    #   when: "'RedHat' in ansible_distribution"
-
-    # - name: Remove 'datadir=' prefix from the line
-    #   ansible.builtin.replace:
-    #     path: "{{ mysqldatadir }}"  # Adjust to your actual MySQL config file path
-    #     regexp: '^datadir='
-    #     replace: ''
-    #   register: mysqlcleandir
-    
-    # - name: Execute MySQL query to find super users
-    #   ansible.builtin.command:
-    #     cmd: "mysql -u {{ mysql_user }} -p{{ mysql_password }} --socket=/var/lib/mysql/mysql.sock -e \"SELECT user, host FROM mysql.user WHERE super_priv = 'Y' and host = '%';\""
-    #   register: superusername
-
-    
-    # - name: Get Installed Version  (linux)
-    #   command: mysql --version
-    #   register: pgdataver
-    #   args:
-    #     chdir: "{{ basedirlnx }}"
-    #   when: "'RedHat' in ansible_distribution"
-      
-    # - name: Get Major Version
-    #   command: mysql --version
-    #   register: majorver
-    #   args:
-    #     chdir: "{{ basedirlnx }}"
-    #   when: "'RedHat' in ansible_distribution"  
+   ss -ltnp | grep mysql
 
     # - name: Get Port
     #   command: "mysql -u {{ mysql_user }} -p{{ mysql_password }} --socket=/var/lib/mysql/mysql.sock -e \"SHOW VARIABLES LIKE 'port';\""

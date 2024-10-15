@@ -1,0 +1,63 @@
+- hosts: oracle12
+  gather_facts: true
+  remote_user: root
+  become: true
+  become_user: root
+  
+  vars:
+    oracle_home_path: /home/oracle/app/oracle/product/12.2.0/dbhome_1
+    oneoff_patch_dir: p30463660
+    oneoff_latest_zip: p30463660_122010_Linux-x86-64.zip
+  tasks:
+    # #discovery start
+    # - name: Get Software Policy Attr
+    #   shell: |
+    #     ./python3 - << 'EOF'
+    #     import pytwist
+    #     from pytwist import * 
+    #     from pytwist.com.opsware.search import Filter
+    #     from pytwist import twistserver
+    #     from pytwist.com.opsware.server import ServerRef
+    #     import json
+    #     ts = pytwist.twistserver.TwistServer()
+    #     try:
+    #         server_service = ts.server.ServerService
+    #         filter = Filter()
+    #         server_refs = server_service.findServerRefs(filter)
+    #         for server_ref in server_refs:
+    #             server_details = ts.server.ServerService.getServerVO(server_ref)
+    #             if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+    #                 try:
+    #                     print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+    #                 except Exception as e:
+    #                     print(f"Error processing server {server_ref.getId()}: {e}")
+          
+    #     except Exception as e:
+    #         print(f"Failed to authenticate: {str(e)}")
+    #         exit(1)  
+    #     EOF
+    #   register: instattr
+    #   args:
+    #     chdir: '/opt/opsware/agent/bin'
+    #   when: "'RedHat' in ansible_distribution"
+    
+    # - name: Get the first installation ID (windows)
+    #   set_fact:
+    #     custattr: "{{ instattr.stdout }}"
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: Display Python script output
+    #   debug:
+    #     var: custattr.SAUser
+    #   when: "'RedHat' in ansible_distribution"
+    - name: "Step 20 --- Check for one-off patch conflicts"
+      unarchive: 
+        src: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_latest_zip }}'
+        dest: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}'
+        list_files: yes
+        owner: oracle
+        remote_src: yes
+    
+
+      
+   

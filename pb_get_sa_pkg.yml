@@ -1,4 +1,4 @@
-- hosts: postgre #change with all for SA
+- hosts: oracle12 #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
   remote_user: root #remove when running on SA Client
@@ -6,9 +6,9 @@
   become_user: root #remove when running on SA Client
   vars:
     - ansible_python_interpreter: /opt/opsware/agent/bin/./python3
-    - download_location: /root
-    - package_name: "chef-12.8.1-1.el7.x86_64.rpm"
-    - package_id: "6210001"
+    - download_location: /opt/opsware/Patching/
+    - package_name: "p30463660_122010_Linux-x86-64.zip"
+    - package_id: "877610001"
   tasks:
     - name: Parameter validation
       ansible.builtin.assert:
