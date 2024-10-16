@@ -156,6 +156,11 @@
         msg: "{{ rslt }}"
       when: "'Windows' in ansible_distribution"
     
+    - name: Restart MySQL service on Windows
+      win_service:
+        name: "{{ service_name }}"  # Change this if your MySQL service name is different
+        state: restarted
+    
     - name: Run mysqlcheck to verify database tables
       win_command: >
         .\mysqlcheck --defaults-file="{{ userdir }}.my.cnf" --all-databases

@@ -201,7 +201,11 @@
     - name: Extract Primary Databases
       set_fact:
         primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
-
+    
+    - name: Concatenate the values into one line
+      set_fact:
+        dbconcat: "{{ primary_databases | join(';') }}"
+    
     - name: Display MySQL Port
       debug:
         msg: "MySQL Port: {{ mysql_port_number[0] }}"
@@ -231,7 +235,7 @@
                 if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'MySQL_Port':'{{ mysql_port_number[0] }}', 'MySQL_PrimaryDB':'{{ primary_databases[0] }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
+                        CAMap = {'MySQL_Port':'{{ mysql_port_number[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

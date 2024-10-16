@@ -52,350 +52,129 @@
     - name: get mysql service name
       shell: systemctl list-units --type=service | grep mysql | cut -d '.' -f1
 
-      register: datadir
+      register: svcname
       when: "'RedHat' in ansible_distribution"
     
-    - name: chk1
+    - name: svcname
       debug:
-        var: datadir
+        var: svcname
       when: "'RedHat' in ansible_distribution"
 
     - name: get datadir
       shell: sudo grep -i 'datadir' /etc/my.cnf
-
-      register: mysqlsvc
+      register: mysqldatadir
       when: "'RedHat' in ansible_distribution"
     
     - name: chk2
       debug:
-        var: mysqlsvc
+        var: mysqldatadir
       when: "'RedHat' in ansible_distribution"
      
     - name: Set fact base dir (linux)
       set_fact:
-        basedirlnx: "{{ mysql_path.stdout[:-4] }}"
+        basedirlnx: "{{ mysql_path.stdout[:-5] }}"
       
       when: "'RedHat' in ansible_distribution"
+    
+   
     
     - name: Get Installed Version  (linux)
-      command: mysql --version
+      command: "{{ basedirlnx }}mysql --version"
       register: mysqlversion
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
+
+    - name: Extract MySQL version number
+      set_fact:
+        mysql_version: "{{ mysqlversion.stdout | regex_search('Distrib ([0-9.]+)', '\\1') }}"
+
+    - name: Show the MySQL version
+      debug:
+        msg: "MySQL version is {{ mysql_version }}"
+
+    - name: Check if MySQL configuration file exists
+      stat:
+        path: /etc/my.cnf
+      register: mysql_conf_stat
+
    
-    - name: Get Port
-      command:  ss -ltnp | grep mysql
-      register: mysqlversion
-      args:
-        chdir: "{{ basedirlnx }}"
+    - name: Read MySQL configuration file (if exists)
+      when: mysql_conf_stat.stat.exists
+      shell: "cat /etc/my.cnf | grep port"
+      register: mysql_port
+
+    - name: Debug MySQL port grep output
+      debug:
+        var: mysql_port.stdout_lines
+
+    - name: Set default MySQL port if not found
+      set_fact:
+        mysql_port_value: "{{ mysql_port.stdout | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
+
+    - name: Display MySQL port
+      debug:
+        msg: "MySQL is running on port {{ mysql_port_value }}"
+
+    - name: Create .my.cnf for MySQL root user with credentials
+      copy:
+        dest: /root/.my.cnf
+        content: |
+          [client]
+          user = root
+          password = P@ssw0rdnh2
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Ensure the .my.cnf file has correct permissions
+      file:
+        path: /root/.my.cnf
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Check MySQL Primary Databases
+      shell: |
+        {{ basedirlnx }}mysql -e "SHOW DATABASES;"
+      register: mysql_databases
+      ignore_errors: yes
+      
+    - name: Extract Primary Databases
+      set_fact:
+        primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
+    
+    - name: Concatenate the values into one line
+      set_fact:
+        dbconcat: "{{ primary_databases | join(';') }}"
+
+    - name: check db  (linux)
+      debug:
+        var: dbconcat
       when: "'RedHat' in ansible_distribution"
-      
-   ss -ltnp | grep mysql
-
-    # - name: Get Port
-    #   command: "mysql -u {{ mysql_user }} -p{{ mysql_password }} --socket=/var/lib/mysql/mysql.sock -e \"SHOW VARIABLES LIKE 'port';\""
-    #   register: portpostgre
-    #   args:
-    #     chdir: "/var/lib"
-    #   when: "'RedHat' in ansible_distribution"  
-
-    # - name: Major Version Check  (linux)
-    #   debug:
-    #     var: major_ver
-    #   when: "'RedHat' in ansible_distribution"
-
-       
-    # - name: Get mode
-    #   command: sudo -u postgres psql -U postgres -t -c "select pg_is_in_recovery();"
-    #   register: modepostgre
-    #   args:
-    #     chdir: "{{ basedirlnx }}"
-    #   when: "'RedHat' in ansible_distribution"  
-
-    # - name: Check latest version (above ver 10 linux)
-    #   shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+' | sort -V | tail -1
-    #   register: latestver
-    #   args:
-    #     chdir: '/var/lib'
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"
-    #     - "majorver.stdout.split('.')[0] | int >= 11"
-        
-    # - name: Check latest version (above ver 10 linux)
-    #   shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
-    #   register: latestverold
-    #   args:
-    #     chdir: '/var/lib'
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"
-    #     - "majorver.stdout.split('.')[0] | int < 11"
+    - name: Execute MySQL command to get database size
+      shell: |
+        {{ basedirlnx }}mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"
+      register: mysql_size_output
     
+    - name: Extract only the numeric value from the output
+      set_fact:
+        mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
+
+    - name: Display the extracted MySQL database size
+      debug:
+        msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
+      when: "'Windows' in ansible_distribution"
     
-    # - name: check latest version  (linux)
-    #   debug:
-    #     var: latestver.stdout[1:]
-    #   when: "'RedHat' in ansible_distribution"
-    
-    # - name: Set mode 
-    #   set_fact:
-    #     psqlmode: 'standalone'
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"
-    #     - "modepostgre.stdout != 't'" 
-    
-    # - name: Set fact data dir (linux)
-    #   set_fact:
-    #     datadirlnx: "{{ pgdatadir.stdout }}"
-    #     datadirshrt: "{{ pgdatadir.stdout[:-7] }}"
-    #     postgres_version: "{{ pgdataver.stdout.split()[1] }}"
-    #     major_ver: "{{ majorver.stdout.split('.')[0] }}"
-    #     portdb: "{{ portpostgre.stdout }}"
-    #     superusers: "{{ superusername.stdout}}"
-    #   when: "'RedHat' in ansible_distribution"
-
-    # - name: Set updateflag
-    #   set_fact:
-    #     needupdates: y
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"
-    #     - "postgres_version != latestver.stdout[1:]"
-
-    # - name: Version Check  (linux)
-    #   debug:
-    #     var: postgres_version
-    #   when: "'RedHat' in ansible_distribution"
-
-    # - name: Major Version Check  (linux)
-    #   debug:
-    #     var: major_ver
-    #   when: "'RedHat' in ansible_distribution"
-
-   
+    - name: Set Fact discovery vars (linux)
+      set_fact:
+        datadirlnx: "{{ mysqldatadir.stdout | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"   
       
 
-    # - name: Push custom attributes to selected server
-    #   shell: |
-    #     ./python3 - << 'EOF'
-    #     import pytwist
-    #     from pytwist import * 
-    #     from pytwist.com.opsware.search import Filter
-    #     from pytwist import twistserver
-    #     from pytwist.com.opsware.server import ServerRef
-    #     import json
-    #     ts = pytwist.twistserver.TwistServer()
-    #     try:
-    #         ts.authenticate("aditya", "Nh2server!")
-    #         server_service = ts.server.ServerService
-    #         filter = Filter()
-    #         server_refs = server_service.findServerRefs(filter)
-    #         for server_ref in server_refs:
-    #             server_details = ts.server.ServerService.getServerVO(server_ref)
-    #             if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
-    #                 try:
-    #                     server_details = ts.server.ServerService.getServerVO(server_ref)
-    #                     CAMap = {'Version':'{{ postgres_version}}', 'datadir': '{{ datadirlnx }}', 'databaseplatform': 'PostgreSQL', 'Home':'{{ basedirlnx }}', 'os_user': '{{ superusers }}', 'port': '{{ portdb }}', 'mode': '{{ psqlmode }}'}
-    #                     ts.server.ServerService.setCustAttrs(server_ref, CAMap)
-    #                     print("ok")
-    #                 except Exception as e:
-    #                     print(f"Error processing server {server_ref.getId()}: {e}")
-          
-    #     except Exception as e:
-    #         print(f"Failed to authenticate: {str(e)}")
-    #         exit(1)  
-    #     EOF
-    #   register: python_output
-    #   args:
-    #     chdir: '/opt/opsware/agent/bin'
-    #   when: "'RedHat' in ansible_distribution"
-
-    # - name: Display Python script output
-    #   debug:
-    #     msg: "{{ python_output.stdout }}" 
-    #   when: "'RedHat' in ansible_distribution"
-   
-
-
-    # - name: Run pg_dumpall  (linux)
-    #   shell: sudo -u postgres pg_dumpall > {{ datadirshrt }}backups/backup_{{ now(utc=true,fmt='%d%m%Y') }}.sql
-    #   register: chk1
-    #   args:
-    #     chdir: "{{ basedirlnx }}"
-    #   when: "'RedHat' in ansible_distribution"
-
-    # - name: Stop old svc   (linux)
-    #   shell: sudo -u postgres pg_ctl stop -D {{ datadirlnx }}
-    #   register: chk3
-    #   args:
-    #     chdir: "{{ basedirlnx }}"
-    #   when: "'RedHat' in ansible_distribution"
-    
-    # - name: Install or update PostgreSQL packages  (linux)
-    #   yum:
-    #     name:
-    #       - postgresql{{ major_ver }}
-    #       - postgresql{{ major_ver }}-server
-    #     state: latest
-    #   when: "'RedHat' in ansible_distribution"
-    
-    # - name: Start old svc   (linux)
-    #   shell: sudo -u postgres pg_ctl start -D {{ datadirlnx }}
-    #   register: chk3
-    #   args:
-    #     chdir: "{{ basedirlnx }}"
-    #   when: "'RedHat' in ansible_distribution"
-    
-
-    # - name: set command links  (linux)
-    #   shell: sudo ln -s /usr/pgsql-{{ major_ver }}/bin/* /usr/bin/ --force
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
-
-
-
-    
-
-    #Windows Host Script
-
-    - name: Get PostgreSQL installation base directory from registry (windows)
-      win_reg_stat:
-        path: HKLM:\SOFTWARE\PostgreSQL\Installations
-      register: postgres_installations
-      when: "'Windows' in ansible_distribution"
-
-    - name: Get Global PostgreSQL (windows)
-      win_reg_stat:
-        path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
-      register: postgresglobal
-      when: "'Windows' in ansible_distribution"
-    
-    - name: Check Postgre Installed Ver (windows)
-      debug:
-        msg: "PostgreSQL {{ postgresglobal.properties['Version']['value'] }}"   
-      when: "'Windows' in ansible_distribution"
-
-    - name: Get the first installation ID (windows)
-      set_fact:
-        installation_id: "{{ postgres_installations.sub_keys[0] }}"
-      when: "'Windows' in ansible_distribution"
-
-    - name: Retrieve installation directory (windows)
-      win_reg_stat:
-        path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
-      register: postgres_installation_dir2
-      when: "'Windows' in ansible_distribution"
-
-    
-    
-   
-    - name: Set fact base dir (windows)
-      set_fact:
-        basedir: "{{ postgres_installation_dir2.properties['Base Directory']['value'] }}"
-        datadir: "{{ postgres_installation_dir2.properties['Data Directory']['value'] }}"
-        installedver: "{{ postgresglobal.properties['Version']['value'] }}"
-        CompleteVer: "{{ postgres_installation_dir2.properties['CLT_Version']['value'] }}"
-        serviceid: "{{ postgres_installation_dir2.properties['Service ID']['value'] }}"
-        superuser: "{{ postgres_installation_dir2.properties['Super User']['value'] }}"
-
-      when: "'Windows' in ansible_distribution"
-
-    - name: Execute SQL command to get PostgreSQL port
-      win_shell: |
-        $env:PGPASSWORD = "P@ssw0rdnh2"
-        {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "SHOW port;" -t
-      become: yes
-      become_method: runas
-      become_user: postgres
-      register: postgres_port
-      when: "'Windows' in ansible_distribution"
-
-    - name: Display the PostgreSQL port
-      debug:
-        msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
-      when: "'Windows' in ansible_distribution"
-
-    - name: Execute SQL command to get PostgreSQL port
-      win_shell: |
-        $env:PGPASSWORD = "P@ssw0rdnh2"
-        {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
-      become: yes
-      become_method: runas
-      become_user: postgres
-      register: postgremode
-      when: "'Windows' in ansible_distribution"
-    
-    - name: Set mode (windows)
-      set_fact:
-        psqlmode: 'standalone'
-      when: 
-        - "'Windows' in ansible_distribution"
-        - "postgremode.stdout != 't'" 
-
-    - name: Set fact port  (windows)
-      set_fact:
-        portpsql: "{{ postgres_port.stdout.strip() }}"
-      when: "'Windows' in ansible_distribution"
-       
-    
-
-    # - name: Check latest version (above ver 10 windows)
-    #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+' | sort -V | tail -1
-    #   register: latestver
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "installedver | int >= 11"
-        
-    # - name: Check latest version (above ver 10 windows)
-    #   win_shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ installedver }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
-    #   register: latestverold
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "installedver | int < 11"
-    - name: Check Version
-      win_shell: |
-          # Ensure PowerShell uses TLS 1.2
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-          # Alternatively, use TLS 1.3 if supported
-          # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
-
-          # Now run your Invoke-WebRequest command
-          $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
-
-          # Extract version numbers that match "v15.x.x"
-          $versions = $response.Content -split "`n" | ForEach-Object {
-              if ($_ -match 'v{{ installedver }}\.[0-9]+') {
-                  $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
-                  if ($matches.Success) {
-                      $matches.Value
-                  }
-              }
-          }
-
-          # Sort the versions and select the latest one
-          $latest_version = $versions | Sort-Object | Select-Object -Last 1
-
-          # Display the latest version
-          $latest_version
-      register: latestver
-      when: "'Windows' in ansible_distribution"
-    
-    - name: check latest version  (windows)
-      debug:
-        var: latestver.stdout[1:-2]
-      when: "'Windows' in ansible_distribution"
-
-    - name: Set updateflag
-      set_fact:
-        needupdates: y
-      when: 
-        - "'Windows' in ansible_distribution"
-        - "installedver != latestver.stdout[1:-2]"
-
-    - name: Create a temporary Python script file
-      win_shell: |
-        $script = @"
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
         import pytwist
         from pytwist import * 
         from pytwist.com.opsware.search import Filter
@@ -404,16 +183,16 @@
         import json
         ts = pytwist.twistserver.TwistServer()
         try:
-            ts.authenticate("aditya", "Nh2server!")
+            ts.authenticate("admin", "nh2123")
             server_service = ts.server.ServerService
             filter = Filter()
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'Version':'{{ CompleteVer }}', 'datadir': '{{ datadir }}','databaseplatform': 'PostgreSQL', 'Home':'{{ basedir }}','os_user': '{{ superuser }}', 'port': '{{ portpsql }}', 'mode': '{{ psqlmode }}'}
+                        CAMap = {'MySQL_Port':'{{ mysql_port_value[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysql_version[0] }}', 'MySQL_Datadir': '{{ datadirlnx[0] }}', 'MySQL_Home':'{{ basedirlnx }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
@@ -421,71 +200,28 @@
           
         except Exception as e:
             print(f"Failed to authenticate: {str(e)}")
-            exit(1)
-        "@
-        $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
-      when: "'Windows' in ansible_distribution"
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
 
-    - name: Execute the Python script
-      win_shell: |
-        cd "C:\Program Files\Opsware\agent\python3"
-        .\python C:\pushcustomattr.py
-      register: result
-      when: "'Windows' in ansible_distribution"
-
-    - name: Display the output
+    - name: Display Python script output
       debug:
-        var: result.stdout
-      when: "'Windows' in ansible_distribution"
+        msg: "{{ python_output.stdout }}" 
+      when: "'RedHat' in ansible_distribution"
+   
 
-    - name: Remove the temporary Python script
-      win_file:
-        path: C:\pushcustomattr.py
-        state: absent
-      when: "'Windows' in ansible_distribution"
+
+   
+
+
+    
+
     
 
       
     
-
-    # - name: Stop PostgreSQL 15 service (windows)
-    #   win_service:
-    #     name: "{{ serviceid }}"
-    #     state: stopped
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Backup PostgreSQL data directory (windows)
-    #   win_command: >
-    #     powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Download PostgreSQL 16 installer (windows)
-    #   win_get_url:
-    #     url: "{{ urlpatch }}"
-    #     dest: C:\{{ installername }}
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Install PostgreSQL 15 (windows)
-    #   win_command: >
-    #     powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
-    #   register: install_output
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Print install output (windows)
-    #   debug:
-    #     var: install_output
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Start PostgreSQL 15 service (windows)
-    #   win_service:
-    #     name: "{{ serviceid }}"
-    #     state: started
-    #   when: "'Windows' in ansible_distribution"
-
-
-    
-
-
-
 
     

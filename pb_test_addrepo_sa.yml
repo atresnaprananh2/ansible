@@ -1,0 +1,50 @@
+- hosts: mysqlrhel2
+  gather_facts: true
+  remote_user: root
+  become: true
+  become_user: root
+  tasks:
+    #discovery start
+    # - name: Create YUM repository file for RHEL 7 Server (RPMs)
+    #   ansible.builtin.copy:
+    #     dest: /etc/yum.repos.d/rhel-7-server-rpms.repo
+    #     content: |
+    #       [rhel-7-server-rpms]
+    #       name=Red Hat Enterprise Linux 7 Server (RPMs)
+    #       baseurl=https://cdn.redhat.com/content/dist/rhel/server/7/7Server/x86_64/os/
+    #       enabled=1
+    #       gpgcheck=1
+    #       gpgkey=https://www.redhat.com/security/data/fd431d51.txt
+
+    # - name: Ensure the YUM cache is updated
+    #   ansible.builtin.yum:
+    #     name: "*"
+    #     state: latest
+    #     update_cache: yes
+    - name: Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        from pytwist.com.opsware.swmgmt import SWMgmtFactory
+
+        sw_repo = ts.swmgmt.SWMgmtFactory().createYumRepository()
+        sw_repo.setName('RedHat CDN 7Server')
+        sw_repo.setURL('https://cdn.redhat.com/content/dist/rhel/server/7/7Server/x86_64/os/')
+        sw_repo.setGPGKeyURL('https://cdn.redhat.com/RPM-GPG-KEY-redhat-release')
+        sw_repo.setSSLVerify(True)
+        # Other necessary configurations based on your certificate setup
+        sw_repo_ref = ts.swmgmt.SWMgmtFactory().saveRepository(sw_repo)
+        
+        EOF
+      register: chkoutput
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+  
+    - name: Display Python script output
+      debug:
+        var: chkoutput
+      when: "'RedHat' in ansible_distribution"
+  
+
+      
+   
