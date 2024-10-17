@@ -1,165 +1,128 @@
-- name: Fetch and Download the Latest MySQL 5.7 RPM files
+- name: Patch MySQL from 5.6 to 5.7
   hosts: mysqlrhel
-  become: yes
-  remote_user: root
-  become: true
-  become_user: root
   gather_facts: yes
+  name: System Discovery
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
   vars:
-    mysql_rpm_dir: /root/mysql_rpms
-    suffix: ".rpm"
+    mysql_version: "5.7.44"  # Adjust as needed
+    mysql_tarball: "mysql-{{ mysql_version }}-linux-glibc2.12-x86_64.tar.gz"
+    #https://dev.mysql.com/get/Downloads/MySQL-5.7/mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz
+    mysql_download_url: "https://dev.mysql.com/get/Downloads/MySQL-5.7/{{ mysql_tarball }}"
+    mysql_install_dir: "/usr/local/mysql"
+    mysql_data_dir: "/usr/local/mysql/data"  # Adjust as necessary
+
   tasks:
-    - name: Get MySQL version
-      shell: "mysql -V"
-      register: mysql_version_output
-      failed_when: mysql_version_output.rc != 0
-
-    - name: Extract MySQL major version
-      set_fact:
-        mysql_major_version: "{{ mysql_version_output.stdout | regex_search('Distrib ([0-9]+\\.[0-9]+)', '\\1') }}"
-    
-    - name: Debug - Show MySQL Major Version
-      debug:
-        msg: "The installed MySQL major version is {{ mysql_major_version[0].split('.')[0] }}"
-
-    - name: tst
-      debug:
-        msg: "{{ ansible_facts.architecture }}"
-
-    
-    - name: Retrieve Repository 
-      shell: |
-        curl -s https://repo.mysql.com/yum/ | grep -o 'mysql-{{ mysql_major_version[0].split('.')[0] }}\.[0-9]*-[^"/]*' | sort -V | tail -n 1
-      register: latest_repo
-    
-    - name: chk latest repo
-      debug:
-        msg: "{{ latest_repo.stdout }}"
-
-    - name: create link download
-      set_fact:
-          mysql_base_url: "https://repo.mysql.com/yum/{{ latest_repo.stdout }}/el/{{ ansible_facts.distribution_major_version }}/{{ ansible_facts.architecture }}/"
-       
-
-    - name: Ensure MySQL RPM directory exists
-      file:
-        path: "{{ mysql_rpm_dir }}"
-        state: directory
+    - name: Create .my.cnf for MySQL root user with credentials
+      copy:
+        dest: /root/.my.cnf
+        content: |
+          [client]
+          user = root
+          password = P@ssw0rdnh2
         owner: root
         group: root
+        mode: '0600'
+
+    - name: Ensure the .my.cnf file has correct permissions
+      file:
+        path: /root/.my.cnf
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Stop MySQL service
+      service:
+        name: mysqld
+        state: stopped
+
+    - name: Backup MySQL data directory
+      command: "cp -r {{ mysql_data_dir }} /usr/local/data_backup"
+      when: mysql_data_dir is defined
+
+    - name: Download MySQL 5.7 tar.gz from archives
+      get_url:
+        url: "http://172.19.2.98/patches/{{ mysql_tarball }}"
+        dest: "/tmp/mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz"
         mode: '0755'
 
-    - name: Fetch server file  for MySQL 5.7
-      shell: |
-        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-server[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
-      register: svr_filenames
+
+    - name: Extract MySQL tar.gz
+      unarchive:
+        src: "/tmp/{{ mysql_tarball }}"
+        dest: "/opt/"
+        remote_src: yes
+
+    - name: Remove old MySQL installation
+      command: "rm -rf {{ mysql_install_dir }}"
+      when: mysql_install_dir is defined
+
+    - name: Move new MySQL installation
+      command: "mv /opt/mysql-{{ mysql_version }}-linux-glibc2.12-x86_64 {{ mysql_install_dir }}"
+
+    # - name: Update MySQL systemd service
+    #   copy:
+    #     src: "{{ mysql_install_dir }}/support-files/mysql.server"
+    #     dest: "/etc/init.d/mysql"
+    #     mode: '0755'
+
+    - name: Set MySQL ownership
+      command: "chown -R mysql:mysql {{ mysql_install_dir }}"
+
+    - name: Initialize MySQL data directory
+      command: "{{ mysql_install_dir }}/bin/mysqld --initialize-insecure --user=mysql --datadir={{ mysql_data_dir }}"
+      args:
+        creates: "{{ mysql_data_dir }}/mysql"
+
     
-    - name: Fetch lib file  for MySQL 5.7
-      shell: |
-        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-libs[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
-      register: lib_filenames
-
-    - name: Fetch common file  for MySQL 5.7
-      shell: |
-        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-common[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
-      register: common_filenames
-
-    - name: Fetch client file  for MySQL 5.7
-      shell: |
-        curl -s {{ mysql_base_url }} | grep -o 'mysql-community-client[^"]*5\.7\.[^"]*\.rpm' | sort -V | tail -n 1
-      register: client_filenames
-    
-    - name: Download MySQL svr rpm 
-      get_url:
-        url: "{{ mysql_base_url }}{{ item }}"
-        dest: "{{ mysql_rpm_dir }}/{{ item }}"
-        mode: '0644'
-      with_items: "{{ svr_filenames.stdout_lines }}"
-
-    - name: Download MySQL lib rpm 
-      get_url:
-        url: "{{ mysql_base_url }}{{ item }}"
-        dest: "{{ mysql_rpm_dir }}/{{ item }}"
-        mode: '0644'
-      with_items: "{{ lib_filenames.stdout_lines }}"
-    
-    - name: Download MySQL common rpm 
-      get_url:
-        url: "{{ mysql_base_url }}{{ item }}"
-        dest: "{{ mysql_rpm_dir }}/{{ item }}"
-        mode: '0644'
-      with_items: "{{ common_filenames.stdout_lines }}"
-    
-    - name: Download MySQL client rpm 
-      get_url:
-        url: "{{ mysql_base_url }}{{ item }}"
-        dest: "{{ mysql_rpm_dir }}/{{ item }}"
-        mode: '0644'
-      with_items: "{{ client_filenames.stdout_lines }}"
- 
-    - name: Get a list of installed MySQL RPMs
-      shell: rpm -qa | grep -i mysql
-      register: mysql_rpm_list
-
-    - name: Set the list of installed MySQL RPMs as a fact
-      set_fact:
-        mysql_rpm_packages: "{{ mysql_rpm_list.stdout_lines }}"
-
-    - name: Debug - Show installed MySQL RPMs
-      debug:
-        msg: "{{ mysql_rpm_packages }}"
-
-    - name: Uninstall MySQL RPMs
-      yum:
-        name: "{{ item }}"
-        state: absent
-      loop: "{{ mysql_rpm_packages }}"
-
-    - name: Debug - Confirmation of uninstallation
-      debug:
-        msg: "Uninstalled RPMs: {{ mysql_rpm_packages }}"
-
-
-    - name: Find all installation files in the directory
-      find:
-        paths: "{{ mysql_rpm_dir }}"
-        file_type: file
-      register: found_files
-
-    - name: Extract filenames from the list
-      set_fact:
-        filenames: "{{ found_files.files | map(attribute='path') | map('basename') | list }}"
-    
-
-    - name: Install MySQL 5.7 RPM common
-      yum:
-        name: "{{ mysql_rpm_dir }}/{{ common_filenames.stdout }}"
-        state: present
-    - name: Install MySQL 5.7 RPM lib
-      yum:
-        name: "{{ mysql_rpm_dir }}/{{ lib_filenames.stdout }}"
-        state: present
-
-    - name: Install MySQL 5.7 RPM svr
-      yum:
-        name: "{{ mysql_rpm_dir }}/{{ svr_filenames.stdout }}"
-        state: present
-    - name: Install MySQL 5.7 RPM client
-      yum:
-        name: "{{ mysql_rpm_dir }}/{{ client_filenames.stdout }}"
-        state: present
-
+    - name: remove installed data
+      command: "rm -rf {{ mysql_data_dir }}"
+      register: rmv
       
-    - name: Ensure MySQL service is started and enabled
+    
+    - name: copy old data
+      command: "cp -R /usr/local/data_backup {{ mysql_data_dir }}"
+      register: cpbak
+
+    - name: Change ownership of /var/lib/mysql to mysql:mysql
+      file:
+        path: "{{ mysql_data_dir }}"
+        owner: mysql
+        group: mysql
+        recurse: yes
+
+    - name: Change permissions of /var/lib/mysql to 755
+      file:
+        path: "{{ mysql_data_dir }}"
+        mode: '0755'
+        recurse: yes
+
+    - name: reload daemon
+      command: "sudo systemctl daemon-reload"
+      register: daemon
+
+    - name: Start MySQL service
       service:
         name: mysqld
         state: started
-        enabled: yes
+    
+    - name: restart mysqld
+      command: "sudo systemctl restart mysqld"
+      register: statuschk
 
-    - name: Check MySQL version
-      command: mysql -V
-      register: mysql_version
+    - name: chkstatus
+      command: "sudo systemctl status mysqld"
+      register: statuschk
 
-    - name: Debug - Show MySQL version
+    - name: check status
       debug:
-        msg: "MySQL version is {{ mysql_version.stdout }}"
+        var: statuschk
+
+    - name: Run MySQL upgrade
+      command: "{{ mysql_install_dir }}/bin/mysql_upgrade -u root -h 127.0.0.1 -P 3306"
+      register: upgrade_result
+
+    - name: Display upgrade result
+      debug:
+        var: upgrade_result.stdout_lines
