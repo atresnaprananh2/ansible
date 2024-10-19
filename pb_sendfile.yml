@@ -1,4 +1,4 @@
-- hosts: postgretestsvr #change with all for SA
+- hosts: mysqlrhel2 #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
   remote_user: root #remove when running on SA Client
