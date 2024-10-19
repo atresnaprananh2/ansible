@@ -7,9 +7,7 @@
   vars:   
     needupdates: n
     psqlmode: 'HA-Standby'
-    mysql_user: 'student'
-    mysql_password: 'Automation@123'
- 
+  
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -133,7 +131,8 @@
         owner: root
         group: root
         mode: '0600'
-
+        
+    # change to check physical data directory
     - name: Check MySQL Primary Databases
       shell: |
         {{ basedirlnx }}mysql -e "SHOW DATABASES;"
@@ -152,6 +151,7 @@
       debug:
         var: dbconcat
       when: "'RedHat' in ansible_distribution"
+      #check physical mysql installation directory
     - name: Execute MySQL command to get database size
       shell: |
         {{ basedirlnx }}mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"

@@ -107,9 +107,9 @@
         name: mysqld
         state: started
     
-    - name: restart mysqld
-      command: "sudo systemctl restart mysqld"
-      register: statuschk
+    # - name: restart mysqld
+    #   command: "sudo systemctl restart mysqld"
+    #   register: statuschk
 
     - name: chkstatus
       command: "sudo systemctl status mysqld"
