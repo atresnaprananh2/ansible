@@ -121,7 +121,7 @@
         opatchver: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Extract major Oracle version (12.2.0)
+    - name: Extract major Oracle version
       set_fact:
         oracle_binary_version: "{{ oraver | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
         opatch_version_int: '{{ opatchver | replace(".", "") }}'

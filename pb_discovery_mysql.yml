@@ -86,33 +86,44 @@
     - name: Extract MySQL version number
       set_fact:
         mysql_version: "{{ mysqlversion.stdout | regex_search('Distrib ([0-9.]+)', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"
 
     - name: Show the MySQL version
       debug:
         msg: "MySQL version is {{ mysql_version }}"
+      when: "'RedHat' in ansible_distribution"
+
 
     - name: Check if MySQL configuration file exists
       stat:
         path: /etc/my.cnf
       register: mysql_conf_stat
+      when: "'RedHat' in ansible_distribution"
 
    
     - name: Read MySQL configuration file (if exists)
-      when: mysql_conf_stat.stat.exists
       shell: "cat /etc/my.cnf | grep port"
       register: mysql_port
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_conf_stat.stat.exists
+
 
     - name: Debug MySQL port grep output
       debug:
         var: mysql_port.stdout_lines
+      when: "'RedHat' in ansible_distribution"
+
 
     - name: Set default MySQL port if not found
       set_fact:
         mysql_port_value: "{{ mysql_port.stdout | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
+      when: "'RedHat' in ansible_distribution"
 
     - name: Display MySQL port
       debug:
         msg: "MySQL is running on port {{ mysql_port_value }}"
+      when: "'RedHat' in ansible_distribution"
 
     - name: Create .my.cnf for MySQL root user with credentials
       copy:
@@ -131,45 +142,95 @@
         owner: root
         group: root
         mode: '0600'
+      when: "'RedHat' in ansible_distribution"
         
     # change to check physical data directory
-    - name: Check MySQL Primary Databases
+    - name: Set Fact discovery vars (linux)
+      set_fact:
+        datadirlnx: "{{ mysqldatadir.stdout | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: get physical data dir content
       shell: |
-        {{ basedirlnx }}mysql -e "SHOW DATABASES;"
+        ./python3 - << 'EOF'
+        import os
+
+        # Path to the MySQL data directory
+        mysql_data_dir = '{{ datadirlnx[0] }}'
+
+        # List all subdirectories (databases)
+        databases = [name for name in os.listdir(mysql_data_dir) 
+                    if os.path.isdir(os.path.join(mysql_data_dir, name)) 
+                    and name not in ('mysql', 'performance_schema', 'information_schema', 'sys')]
+
+        print(databases)
+        EOF
       register: mysql_databases
-      ignore_errors: yes
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"   
+    
+    # - name: Check MySQL Primary Databases
+    #   shell: |
+    #     {{ basedirlnx }}mysql -e "SHOW DATABASES;"
+    #   register: mysql_databases
+    #   ignore_errors: yes
+    #   when: "'RedHat' in ansible_distribution"
       
+    # - name: Extract Primary Databases
+    #   set_fact:
+    #     primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
+    #   when: "'RedHat' in ansible_distribution"
+
     - name: Extract Primary Databases
       set_fact:
-        primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
+        primary_databases: "{{ mysql_databases.stdout | replace(\"'\", '\"') | from_json }}"
+      when: "'RedHat' in ansible_distribution"
     
     - name: Concatenate the values into one line
       set_fact:
         dbconcat: "{{ primary_databases | join(';') }}"
+      when: "'RedHat' in ansible_distribution"
 
     - name: check db  (linux)
       debug:
         var: dbconcat
       when: "'RedHat' in ansible_distribution"
-      #check physical mysql installation directory
-    - name: Execute MySQL command to get database size
-      shell: |
-        {{ basedirlnx }}mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"
-      register: mysql_size_output
-    
-    - name: Extract only the numeric value from the output
-      set_fact:
-        mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
 
-    - name: Display the extracted MySQL database size
-      debug:
-        msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
-      when: "'Windows' in ansible_distribution"
+      #check physical mysql installation directory
+    - name: get rootsize
+      shell: du -sm {{ datadirlnx }}/*/ | awk '{sum += $1} END {print sum " MB"}'
+      register: mysql_database_size
+      when: "'RedHat' in ansible_distribution"
+
+    - name: get router info 
+      shell: ls -l | grep 'mysql-router'
+      register: routerinfo
+      when: "'RedHat' in ansible_distribution"
     
-    - name: Set Fact discovery vars (linux)
-      set_fact:
-        datadirlnx: "{{ mysqldatadir.stdout | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
-      when: "'RedHat' in ansible_distribution"   
+    - name: get shell info 
+      shell: ls -l | grep 'mysql-shell'
+      register: shellinfo
+      when: "'RedHat' in ansible_distribution"
+
+    # - name: Execute MySQL command to get database size
+    #   shell: |
+    #     {{ basedirlnx }}mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"
+    #   register: mysql_size_output
+    #   when: "'RedHat' in ansible_distribution"
+    
+    # - name: Extract only the numeric value from the output
+    #   set_fact:
+    #     mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: Display the extracted MySQL database size
+    #   debug:
+    #     msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
+    #   when: "'RedHat' in ansible_distribution"
+
+    
+   
       
 
     - name: Push custom attributes to selected server
@@ -192,7 +253,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'MySQL_Port':'{{ mysql_port_value[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysql_version[0] }}', 'MySQL_Datadir': '{{ datadirlnx[0] }}', 'MySQL_Home':'{{ basedirlnx }}'}
+                        CAMap = {'MySQL_Router':'{{ routerinfo.stdout }}', 'MySQL_Shell':'{{ shellinfo.stdout }}', 'MySQL_Port':'{{ mysql_port_value[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size.stdout }}', 'MySQL_Version':'{{ mysql_version[0] }}', 'MySQL_Datadir': '{{ datadirlnx[0] }}', 'MySQL_Home':'{{ basedirlnx }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
@@ -211,6 +272,278 @@
       debug:
         msg: "{{ python_output.stdout }}" 
       when: "'RedHat' in ansible_distribution"
+
+       #Windows Host Script
+    - name: Validate if WOW6432Node registry key exists (Windows)
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
+        state: present
+      register: registry_check
+      when: "'Windows' in ansible_distribution"
+
+    - name: Output registry check result (Windows)
+      debug:
+        var: registry_check.exists
+      when: "'Windows' in ansible_distribution"
+
+    - name: Get MySQL installation base directory from registry (windows x64)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB
+      register: mysql_installation64
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+
+   
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x64)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[1] }}
+      register: mysql_installation_264
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+
+    - name: Get MySQL installation base directory from registry (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB
+      register: mysql_installation86
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB\{{ mysql_installation86.sub_keys[0] }}
+      register: mysql_installation_286
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+
+    - name: set path x64 (Windows)
+      set_fact:
+        mysql_installation: "{{ mysql_installation64 }}"
+        mysql_installation_2: "{{ mysql_installation_264 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists" 
+
+    - name: set path x86 (Windows)
+      set_fact:
+        mysql_installation: "{{ mysql_installation86 }}"
+        mysql_installation_2: "{{ mysql_installation_286 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+
+    - name: Run wmic to get disk size and free space in bytes (Windows)
+      win_shell: |
+        wmic logicaldisk where "DeviceID='C:'" get Size,FreeSpace /format:value   
+      register: disk_info
+      when: "'Windows' in ansible_distribution"
+
+    - name: Extract FreeSpace and Size values safely (Windows)
+      set_fact:
+        free_space_raw: "{{ disk_info.stdout | regex_search('FreeSpace=([0-9]+)', '\\1') }}"
+        size_raw: "{{ disk_info.stdout | regex_search('Size=([0-9]+)', '\\1') }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Clean and convert FreeSpace and Size to integers (Windows)
+      set_fact:
+        free_space: "{{ free_space_raw | default('0') | regex_replace('\\D', '') | int }}"
+        size: "{{ size_raw | default('0') | regex_replace('\\D', '') | int }}"
+
+    - name: Convert FreeSpace and Size to GB (Windows)
+      set_fact:
+        free_space_gb: "{{ free_space | float / 1024 / 1024 / 1024 | round(2) }}"
+        size_gb: "{{ size | float / 1024 / 1024 / 1024 | round(2) }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display FreeSpace and Size in GB (Windows)
+      debug:
+        msg: "FreeSpace: {{ free_space_gb | float |round(2) }} GB, Size: {{ size_gb | float | round(2) }} GB"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
+      ansible.builtin.win_shell: |
+        $content = @"
+        [client]
+        user=root
+        password=Welcome123..
+        "@
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+        [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
+      when: "'Windows' in ansible_distribution"
+    
+   
+
+    - name: Set fact base dir (windows)
+      set_fact:
+        totalspace: "{{ size_gb | float | round(2) }}"
+        freespace: "{{ free_space_gb | float |round(2) }}"
+        binloc: "{{ mysql_installation_2.properties['Location']['value'][:-1]  }}"
+        mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: dataloctest (Windows)
+      debug:
+        msg: "{{ mysql_installation_2 }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Check MySQL Data Directory (Windows)
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SHOW VARIABLES LIKE 'datadir';"
+      register: mysql_datadir
+      args:
+        chdir: "{{ binloc }}/bin" 
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
+
+    - name: Extract and Clean Data Directory (Windows)
+      set_fact:
+        dataloc: "{{ mysql_datadir.stdout_lines[1] | regex_replace('^datadir\\s+', '') | regex_replace('\\\\\\\\', '\\\\') | regex_replace('\\\\$', '') }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display Cleaned MySQL Data Directory (Windows)
+      debug:
+        msg: "MySQL Data Directory: {{ dataloc }}"
+      when: "'Windows' in ansible_distribution"
+  
+    
+    - name: Execute MySQL command to get database size (Windows)
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"
+      args:
+        chdir: "{{ binloc }}/bin" 
+      register: mysql_size_output
+      when: "'Windows' in ansible_distribution"
+   
+    - name: Extract only the numeric value from the output (Windows)
+      set_fact:
+        mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the extracted MySQL database size (Windows)
+      debug:
+        msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Get MySQL Port (Windows)
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SHOW VARIABLES LIKE 'port';"
+      register: mysql_port
+      args:
+        chdir: "{{ binloc }}/bin" 
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution" 
+
+    - name: Debug raw output of MySQL port (Windows)
+      debug:
+        var: mysql_port.stdout_lines[1]
+      when: "'Windows' in ansible_distribution"
+
+    - name: Extract MySQL Port (Windows)
+      set_fact:
+        mysql_port_number: "{{ mysql_port.stdout_lines[1] | regex_search('port\\s+(\\d+)', '\\1') }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Check MySQL Primary Databases (Windows)
+      win_shell: |
+        .\mysql --defaults-file="{{ userdir }}.my.cnf" -e "SHOW DATABASES;"
+      register: mysql_databases
+      ignore_errors: yes
+      args:
+        chdir: "{{ binloc }}/bin" 
+      when: "'Windows' in ansible_distribution"
+
+    - name: Debug raw output of databases (Windows)
+      debug:
+        var: mysql_databases.stdout
+      when: "'Windows' in ansible_distribution"
+
+    - name: Extract Primary Databases (Windows)
+      set_fact:
+        primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
+      when: "'Windows' in ansible_distribution"
+   
+    - name: Concatenate the values into one line (Windows)
+      set_fact:
+        dbconcat: "{{ primary_databases | join(';') }}"
+      when: "'Windows' in ansible_distribution"
+   
+    - name: Display MySQL Port (Windows)
+      debug:
+        msg: "MySQL Port: {{ mysql_port_number[0] }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display Primary Databases (Windows)
+      debug:
+        msg: "Primary Databases: {{ primary_databases[0] }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Create a temporary Python script file (Windows)
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            ts.authenticate("aditya", "S@ndriel17")
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'MySQL_Port':'{{ mysql_port_number[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+ 
+    - name: Execute the Python script (Windows)
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr.py
+      register: result
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the output (Windows)
+      debug:
+        var: result.stdout
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script (Windows)
+      win_file:
+        path: C:\pushcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+    
+
+      
+    
+
+    
+
+    
+
+
+
+
+    
    
 
 

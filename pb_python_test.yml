@@ -1,15 +1,65 @@
-- hosts: oracle19
-  remote_user: oracle
-  become: true
-  become_method: sudo
-  name: checkrunningdb
+- hosts: mysqlrhel
+  gather_facts: yes
+  name: System Discovery
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
   tasks:
-  - name: run python script locally (Using connection local)
-    ansible.builtin.script:
-      cmd: ~/ansible/pyscripts/checkcxoracle.py
-      executable: /usr/bin/python3
-    register: result
-    ignore_errors: True
-  
-  - ansible.builtin.debug:
-      msg: "{{ result.failed }}"  
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
+        import os
+
+        # Path to the MySQL data directory
+        mysql_data_dir = '/usr/local/mysql/data'
+
+        # List all subdirectories (databases)
+        databases = [name for name in os.listdir(mysql_data_dir) 
+                    if os.path.isdir(os.path.join(mysql_data_dir, name)) 
+                    and name not in ('mysql', 'performance_schema', 'information_schema', 'sys')]
+
+        print(databases)
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Convert string to valid JSON
+      set_fact:
+        json_result: "{{ python_output.stdout | replace(\"'\", '\"') | from_json }}"
+
+
+    - name: Debug the concatenated result
+      debug:
+        msg: "Concatenated databases: {{ json_result | join(';')  }}"
+
+    - name: get 2nd attr
+      shell: |
+        ./python3 - << 'EOF'
+        import os
+
+        def get_directory_size(directory):
+            total_size = 0
+            for dirpath, dirnames, filenames in os.walk(directory):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    # Skip if it is a symbolic link
+                    if not os.path.islink(fp):
+                        total_size += os.path.getsize(fp)
+            return total_size
+
+        # Path to MySQL data directory
+        mysql_data_dir = '/usr/local/mysql/data'
+
+        # Calculate size in MB
+        size_in_mb = ((get_directory_size(mysql_data_dir) / 1024) / 1024)
+        print(f"Total size of MySQL data directory: {size_in_mb:.2f} MB")
+        EOF
+      register: python_output2
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    - name: Display OS distribution and version (windows)
+      debug:
+        var: python_output2

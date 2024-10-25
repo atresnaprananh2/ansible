@@ -1,11 +1,11 @@
-- hosts: mysqlrhel2 #change with all for SA
+- hosts: postgretestsvr #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
   remote_user: root #remove when running on SA Client
   become: true #remove when running on SA Client
   become_user: root #remove when running on SA Client
   vars:
-    - fileurl: http://172.19.2.98/patches/rhel7.tar.gz
+    - fileurl: http://172.19.2.98/patches/rhel8.tar.gz
     - dest: /var/lib
    
   tasks:

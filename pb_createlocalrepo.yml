@@ -1,29 +1,30 @@
-- hosts: mysqlrhel2 #change with all for SA
+- hosts: postgretestsvr #change with all for SA
   gather_facts: yes
   name: create local repo
   remote_user: root #remove when running on SA Client
   become: true #remove when running on SA Client
   become_user: root #remove when running on SA Client
   vars:
-    - fileurl: http://172.19.2.98/patches/rhel7.tar.gz
+    - fileurl: http://172.19.2.98/patches/rhel8.tar.gz
     - dest: /var/lib
    
   tasks:
     - name: create localrepo dir
       command: sudo mkdir /var/local_repo/
       when: "'RedHat' in ansible_distribution"
-
+    
     - name: Prerequisite --- download patch file
       get_url:
         url: '{{ fileurl }}'
         dest: "{{ dest }}"
+    
 
     - name: copy downloaded repofile
-      command: sudo mv {{ dest }}/rhel7.tar.gz /var/local_repo/
+      command: sudo mv {{ dest }}/rhel8.tar.gz /var/local_repo/
       when: "'RedHat' in ansible_distribution"
     
     - name: Extract repo 
-      command: sudo tar -xvzf rhel7.tar.gz
+      command: sudo tar -xvzf rhel8.tar.gz
       args:
         chdir: '/var/local_repo/'
       when: "'RedHat' in ansible_distribution"
@@ -31,19 +32,19 @@
     - name: Create the local YUM repository file
       ansible.builtin.yum_repository:
         name: "LocalRepo"
-        description: "Local RHEL 7 Repository"
-        baseurl: "file:///var/local_repo/rhel7/"
+        description: "Local RHEL 8 Repository"
+        baseurl: "file:///var/local_repo/rhel8/"
         enabled: yes
         gpgcheck: no
 
-    - name: Update YUM cache
-      ansible.builtin.yum:
-        name: "*"
-        state: latest
+    # - name: Update YUM cache
+    #   ansible.builtin.yum:
+    #     name: "*"
+    #     state: latest
     
-    - name: install devel kit
-      command: sudo yum install gcc readline-devel zlib-devel -y
-      when: "'RedHat' in ansible_distribution"
+    # - name: install devel kit
+    #   command: sudo yum install make gcc readline-devel zlib-devel -y
+    #   when: "'RedHat' in ansible_distribution"
    
 
     

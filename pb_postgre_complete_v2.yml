@@ -7,6 +7,10 @@
   vars:
     installername: postgresqlinstall.exe
     urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
+    fileurlrhel7: http://172.19.2.98/patches/rhel7.tar.gz
+    fileurlrhel8: http://172.19.2.98/patches/rhel8.tar.gz
+    fileurlrhel9: http://172.19.2.98/patches/rhel9.tar.gz
+    dest: /var/lib
     service_pattern: postgresql
   tasks:
     - name: Gather system facts
@@ -17,16 +21,16 @@
         msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }}"
     
     #linux script
-    - name: Gather installed package facts (linux)
-      ansible.builtin.package_facts:
-      when: "'Windows' not in ansible_distribution"
+    # - name: Gather installed package facts (linux)
+    #   ansible.builtin.package_facts:
+    #   when: "'Windows' not in ansible_distribution"
     
-    - name: Check if PostgreSQL is installed (linux)
-      debug:
-        msg: "{{ inventory_hostname }}: PostgreSQL is installed"
-      when: 
-        - "'Windows' not in ansible_distribution"
-        - "'postgresql' in ansible_facts.packages or 'postgresql-server' in ansible_facts.packages"
+    # - name: Check if PostgreSQL is installed (linux)
+    #   debug:
+    #     msg: "{{ inventory_hostname }}: PostgreSQL is installed"
+    #   when: 
+    #     - "'Windows' not in ansible_distribution"
+    #     - "'postgresql' in ansible_facts.packages or 'postgresql-server' in ansible_facts.packages"
     
     - name: Find the path of psql  (linux)
       command: which psql
@@ -54,12 +58,6 @@
         basedirpg: "{{ basedirlnx[:-5] }}"
       when: "'RedHat' in ansible_distribution"
      
-    # - name: chk basedir
-    #   debug:
-    #     msg: "{{ basedirpg }}"
-    #   when: 
-    #     - "'Windows' not in ansible_distribution"
-
   
     - name: Find the path of postgre data  (linux)
       command: sudo -u postgres psql -t -P format=unaligned -c "SHOW data_directory;"
@@ -137,9 +135,71 @@
       command: tar -xzf postgresql-{{ latestver.stdout[1:] }}.tar.gz
       when: "'RedHat' in ansible_distribution"
     
-    - name: install devel kit
-      command: sudo yum install gcc readline-devel zlib-devel -y
-      when: "'RedHat' in ansible_distribution"
+    # - name: repository check
+    #   command: sudo yum install make gcc readline-devel zlib-devel -y 
+    #   ignore_errors: true
+    #   register: chkrepo
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: create localrepo dir
+    #   command: sudo mkdir /var/local_repo/
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: get local repo rhel {{ ansible_distribution_major_version }}
+    #   get_url:
+    #     url: '{{ fileurlrhel7 }}'
+    #     dest: '{{ dest }}'
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"
+    #     - chkrepo.failed == true
+    #     - ansible_distribution_major_version == "7"
+
+    # - name: get local repo rhel {{ ansible_distribution_major_version }}
+    #   get_url:
+    #     url: '{{ fileurlrhel8 }}'
+    #     dest: '{{ dest }}'
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"
+    #     - chkrepo.failed == true
+    #     - ansible_distribution_major_version == "8"
+
+    # - name: get local repo rhel {{ ansible_distribution_major_version }}
+    #   get_url:
+    #     url: '{{ fileurlrhel9 }}'
+    #     dest: '{{ dest }}'
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"
+    #     - chkrepo.failed == true
+    #     - ansible_distribution_major_version == "9"
+
+    # - name: copy downloaded repofile
+    #   command: sudo mv {{ dest }}/rhel{{ ansible_distribution_major_version }}.tar.gz /var/local_repo/
+    #   when: "'RedHat' in ansible_distribution"
+    
+    # - name: Extract repo 
+    #   command: sudo tar -xvzf rhel{{ ansible_distribution_major_version }}.tar.gz
+    #   args:
+    #     chdir: '/var/local_repo/'
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: Create the local YUM repository file
+    #   ansible.builtin.yum_repository:
+    #     name: "LocalRepo"
+    #     description: "Local RHEL {{ ansible_distribution_major_version }} Repository"
+    #     baseurl: "file:///var/local_repo/rhel{{ ansible_distribution_major_version }}/"
+    #     enabled: yes
+    #     gpgcheck: no
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: repolist yum
+    #   shell: yum repolist
+    #   args:
+    #     chdir: '{{ basedirlnx }}'
+    #   when: "'RedHat' in ansible_distribution"
+    
+    # - name: install devel kit
+    #   command: sudo yum install make gcc readline-devel zlib-devel -y
+    #   when: "'RedHat' in ansible_distribution"
 
     - name: configure installer
       shell: ./configure --prefix={{ basedirpg }} --without-icu
@@ -167,17 +227,9 @@
         msg:
           - "{{ chkins.stdout }}"
       when: "'RedHat' in ansible_distribution"
-
-    # - name: Install or update PostgreSQL packages  (linux)
-    #   yum:
-    #     name:
-    #       - postgresql{{ major_ver }}
-    #       - postgresql{{ major_ver }}-server
-    #     state: latest
-    #   when: "'RedHat' in ansible_distribution"
     
     - name: Start old svc   (linux)
-      shell: sudo -u postgres {{basedirlnx}}/pg_ctl start -D {{ datadirlnx }}
+      shell: sudo -u postgres {{ basedirlnx }}/pg_ctl start -D {{ datadirlnx }}
       register: chk3
       args:
         chdir: "{{ basedirlnx }}"
@@ -189,10 +241,25 @@
       args:
         chdir: '{{ basedirlnx }}'
       when: "'RedHat' in ansible_distribution"
-
-
-
     
+
+    - name: remove local repo 1
+      shell: rm -rf /var/local_repo
+      args:
+        chdir: '{{ basedirlnx }}'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: remove local repo 2
+      shell: rm -rf /etc/yum.repos.d/LocalRepo.repo
+      args:
+        chdir: '{{ basedirlnx }}'
+      when: "'RedHat' in ansible_distribution"
+      
+    - name: repolist yum
+      shell: yum repolist
+      args:
+        chdir: '{{ basedirlnx }}'
+      when: "'RedHat' in ansible_distribution"
 
     #Windows Host Script
 
@@ -206,7 +273,7 @@
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
       register: postgresglobal
-      when: "'Windows' in ansible_distribution"
+      when: "'Windows' in ansible_distribution" 
     
     - name: Check Postgre Installed Ver (windows)
       debug:

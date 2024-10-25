@@ -30,11 +30,12 @@
         path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
         state: present
       register: registry_check
+      when: "'Windows' in ansible_distribution"
 
     - name: Output registry check result
       debug:
         var: registry_check.exists
-   
+      when: "'Windows' in ansible_distribution"
 
     - name: Get MySQL installation base directory from registry (windows x64)
       win_reg_stat:
@@ -48,7 +49,7 @@
     
     - name: Get MySQL installation base directory from registry down by 1 level (windows x64)
       win_reg_stat:
-        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[0] }}
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[1] }}
       register: mysql_installation_264
       when: 
         - "'Windows' in ansible_distribution"
@@ -90,10 +91,13 @@
       win_shell: |
         wmic logicaldisk where "DeviceID='C:'" get Size,FreeSpace /format:value   
       register: disk_info
+      when: "'Windows' in ansible_distribution"
+
     - name: Extract FreeSpace and Size values safely
       set_fact:
         free_space_raw: "{{ disk_info.stdout | regex_search('FreeSpace=([0-9]+)', '\\1') }}"
         size_raw: "{{ disk_info.stdout | regex_search('Size=([0-9]+)', '\\1') }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Clean and convert FreeSpace and Size to integers
       set_fact:
@@ -104,10 +108,12 @@
       set_fact:
         free_space_gb: "{{ free_space | float / 1024 / 1024 / 1024 | round(2) }}"
         size_gb: "{{ size | float / 1024 / 1024 / 1024 | round(2) }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Display FreeSpace and Size in GB
       debug:
         msg: "FreeSpace: {{ free_space_gb | float |round(2) }} GB, Size: {{ size_gb | float | round(2) }} GB"
+      when: "'Windows' in ansible_distribution"
 
     - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
       ansible.builtin.win_shell: |
@@ -118,6 +124,7 @@
         "@
         $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
         [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
+      when: "'Windows' in ansible_distribution"
     
    
 
@@ -127,6 +134,7 @@
         freespace: "{{ free_space_gb | float |round(2) }}"
         binloc: "{{ mysql_installation_2.properties['Location']['value'][:-1]  }}"
         mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
+      when: "'Windows' in ansible_distribution"
     
     - name: dataloctest
       debug:
@@ -140,19 +148,18 @@
       args:
         chdir: "{{ binloc }}/bin" 
       ignore_errors: yes
-
-    
-
-  
+      when: "'Windows' in ansible_distribution"
 
     - name: Extract and Clean Data Directory
       set_fact:
         dataloc: "{{ mysql_datadir.stdout_lines[1] | regex_replace('^datadir\\s+', '') | regex_replace('\\\\\\\\', '\\\\') | regex_replace('\\\\$', '') }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Display Cleaned MySQL Data Directory
       debug:
         msg: "MySQL Data Directory: {{ dataloc }}"
-   
+      when: "'Windows' in ansible_distribution"
+  
     
     - name: Execute MySQL command to get database size
       win_shell: |
@@ -160,10 +167,12 @@
       args:
         chdir: "{{ binloc }}/bin" 
       register: mysql_size_output
-    
+      when: "'Windows' in ansible_distribution"
+   
     - name: Extract only the numeric value from the output
       set_fact:
         mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Display the extracted MySQL database size
       debug:
@@ -177,14 +186,17 @@
       args:
         chdir: "{{ binloc }}/bin" 
       ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
 
     - name: Debug raw output of MySQL port
       debug:
         var: mysql_port.stdout_lines[1]
+      when: "'Windows' in ansible_distribution"
 
     - name: Extract MySQL Port
       set_fact:
         mysql_port_number: "{{ mysql_port.stdout_lines[1] | regex_search('port\\s+(\\d+)', '\\1') }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Check MySQL Primary Databases
       win_shell: |
@@ -193,27 +205,32 @@
       ignore_errors: yes
       args:
         chdir: "{{ binloc }}/bin" 
+      when: "'Windows' in ansible_distribution"
 
     - name: Debug raw output of databases
       debug:
         var: mysql_databases.stdout
+      when: "'Windows' in ansible_distribution"
 
     - name: Extract Primary Databases
       set_fact:
         primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
-    
+      when: "'Windows' in ansible_distribution"
+   
     - name: Concatenate the values into one line
       set_fact:
         dbconcat: "{{ primary_databases | join(';') }}"
-    
+      when: "'Windows' in ansible_distribution"
+   
     - name: Display MySQL Port
       debug:
         msg: "MySQL Port: {{ mysql_port_number[0] }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Display Primary Databases
       debug:
         msg: "Primary Databases: {{ primary_databases[0] }}"
-
+      when: "'Windows' in ansible_distribution"
 
     - name: Create a temporary Python script file
       win_shell: |
@@ -270,40 +287,7 @@
       
     
 
-    # # - name: Stop PostgreSQL 15 service (windows)
-    # #   win_service:
-    # #     name: "{{ serviceid }}"
-    # #     state: stopped
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Backup PostgreSQL data directory (windows)
-    # #   win_command: >
-    # #     powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Download PostgreSQL 16 installer (windows)
-    # #   win_get_url:
-    # #     url: "{{ urlpatch }}"
-    # #     dest: C:\{{ installername }}
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Install PostgreSQL 15 (windows)
-    # #   win_command: >
-    # #     powershell -command "Start-Process -FilePath 'C:\{{ installername }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
-    # #   register: install_output
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Print install output (windows)
-    # #   debug:
-    # #     var: install_output
-    # #   when: "'Windows' in ansible_distribution"
-
-    # # - name: Start PostgreSQL 15 service (windows)
-    # #   win_service:
-    # #     name: "{{ serviceid }}"
-    # #     state: started
-    # #   when: "'Windows' in ansible_distribution"
-
+    
 
     
 
