@@ -49,7 +49,6 @@
 
     - name: get mysql service name
       shell: systemctl list-units --type=service | grep mysql | cut -d '.' -f1
-
       register: svcname
       when: "'RedHat' in ansible_distribution"
     
@@ -135,6 +134,7 @@
         owner: root
         group: root
         mode: '0600'
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Ensure the .my.cnf file has correct permissions
       file:

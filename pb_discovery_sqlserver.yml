@@ -1,0 +1,12 @@
+- name: Get SQL Server version from Windows Registry
+  hosts: winsqlserver  # Replace with your actual Windows host group
+  gather_facts: yes
+  tasks:
+    - name: Check SQL Server version from alternative path
+      win_shell: |
+        Get-ChildItem -Path 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server' -Recurse |
+        ForEach-Object { Get-ItemProperty -Path $_.PSPath | Select-Object -Property PSPath, * }
+      register: currentversion
+
+    - debug:
+        var: currentversion.stdout_lines

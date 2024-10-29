@@ -1,19 +1,117 @@
-- name: Patch MySQL from 5.6 to 5.7
+- name: Patch MySQL RHEL
   hosts: mysqlrhel
   gather_facts: yes
   name: System Discovery
   remote_user: root #remove when running on SA Client
   become: true #remove when running on SA Client
   become_user: root #remove when running on SA Client
-  vars:
-    mysql_version: "5.7.44"  # Adjust as needed
-    mysql_tarball: "mysql-{{ mysql_version }}-linux-glibc2.12-x86_64.tar.gz"
+  # vars:
+  #   mysql_version: "5.7.44"  # Adjust as needed
+  #   mysql_tarball: "mysql-{{ mysql_version }}-linux-glibc2.12-x86_64.tar.gz"
     #https://dev.mysql.com/get/Downloads/MySQL-5.7/mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz
-    mysql_download_url: "https://dev.mysql.com/get/Downloads/MySQL-5.7/{{ mysql_tarball }}"
-    mysql_install_dir: "/usr/local/mysql"
-    mysql_data_dir: "/usr/local/mysql/data"  # Adjust as necessary
+    # mysql_download_url: "https://dev.mysql.com/get/Downloads/MySQL-5.7/{{ mysql_tarball }}"
+    # mysql_install_dir: "/usr/local/mysql"
+    # mysql_data_dir: "/usr/local/mysql/data"  # Adjust as necessary
 
   tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 1
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        mysql_version: "{{ custattr.MySQL_destinationversion }}"
+        mysql_tarball: "{{ custattr.MySQL_patchname }}"
+        mysql_patchid: "{{ custattr.MySQL_patchid }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - set variables 2
+      set_fact:
+        mysql_destdownload: "/tmp/{{ mysql_tarball }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Check MySQL installation
+      shell: ". /etc/profile && which mysql"
+      register: mysql_path
+      ignore_errors: yes
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Resolve the real path of mysql  (linux)
+      command: readlink -f "{{ mysql_path.stdout }}"
+      register: mysql_path
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: mysql_path
+      when: "'RedHat' in ansible_distribution"
+      
+    - name: get datadir
+      shell: sudo grep -i 'datadir' /etc/my.cnf
+      register: mysqldatadir
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk2
+      debug:
+        var: mysqldatadir
+      when: "'RedHat' in ansible_distribution"
+     
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ mysql_path.stdout[:-5] }}" 
+      when: "'RedHat' in ansible_distribution"   
+    
+    - name: Set Fact discovery vars (linux)
+      set_fact:
+        mysql_data_dir: "{{ mysqldatadir.stdout | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+        mysql_install_dir:  "{{ basedirlnx[:-4] }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Set Fact discovery vars2 (linux)
+      set_fact:
+        mysql_data_dir_clean: "{{ mysql_data_dir[0] }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: chk3
+      debug:
+        var: mysql_data_dir[0]
+      when: "'RedHat' in ansible_distribution"   
+
     - name: Create .my.cnf for MySQL root user with credentials
       copy:
         dest: /root/.my.cnf
@@ -24,6 +122,8 @@
         owner: root
         group: root
         mode: '0600'
+      when: "'RedHat' in ansible_distribution"   
+
 
     - name: Ensure the .my.cnf file has correct permissions
       file:
@@ -31,35 +131,55 @@
         owner: root
         group: root
         mode: '0600'
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Stop MySQL service
       service:
         name: mysqld
         state: stopped
+      when: "'RedHat' in ansible_distribution"   
+
 
     - name: Backup MySQL data directory
-      command: "cp -r {{ mysql_data_dir }} /usr/local/data_backup"
-      when: mysql_data_dir is defined
+      command: cp -r {{ mysql_data_dir_clean }} /usr/local/data_backup
+      when: 
+        - "'RedHat' in ansible_distribution"   
+        - mysql_data_dir is defined
 
-    - name: Download MySQL 5.7 tar.gz from archives
-      get_url:
-        url: "http://172.19.2.98/patches/{{ mysql_tarball }}"
-        dest: "/tmp/mysql-5.7.44-linux-glibc2.12-x86_64.tar.gz"
-        mode: '0755'
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
 
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysql_patchid }},None,None,'{{ mysql_tarball }}', None, '/tmp'))
+      register: test
+      when: "'RedHat' in ansible_distribution"   
+      tags: download,remote
+
+    # - name: Download MySQL from archives
+    #   get_url:
+    #     url: "http://172.19.2.98/patches/{{ mysql_tarball }}"
+    #     dest: "/tmp/{{ mysql_tarball }}"
+    #     mode: '0755'
+    #   when: "'RedHat' in ansible_distribution"   
 
     - name: Extract MySQL tar.gz
       unarchive:
-        src: "/tmp/{{ mysql_tarball }}"
+        src: "{{ mysql_destdownload }}"
         dest: "/opt/"
         remote_src: yes
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Remove old MySQL installation
       command: "rm -rf {{ mysql_install_dir }}"
-      when: mysql_install_dir is defined
+      when:
+        - "'RedHat' in ansible_distribution"    
+        - mysql_install_dir is defined
 
     - name: Move new MySQL installation
       command: "mv /opt/mysql-{{ mysql_version }}-linux-glibc2.12-x86_64 {{ mysql_install_dir }}"
+      when: "'RedHat' in ansible_distribution"   
 
     # - name: Update MySQL systemd service
     #   copy:
@@ -69,43 +189,51 @@
 
     - name: Set MySQL ownership
       command: "chown -R mysql:mysql {{ mysql_install_dir }}"
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Initialize MySQL data directory
-      command: "{{ mysql_install_dir }}/bin/mysqld --initialize-insecure --user=mysql --datadir={{ mysql_data_dir }}"
+      command: "{{ mysql_install_dir }}/bin/mysqld --initialize-insecure --user=mysql --datadir={{ mysql_data_dir_clean }}"
       args:
-        creates: "{{ mysql_data_dir }}/mysql"
+        creates: "{{ mysql_data_dir_clean }}/mysql"
+      when: "'RedHat' in ansible_distribution"   
 
     
     - name: remove installed data
-      command: "rm -rf {{ mysql_data_dir }}"
+      command: "rm -rf {{ mysql_data_dir_clean }}"
       register: rmv
+      when: "'RedHat' in ansible_distribution"   
       
     
     - name: copy old data
-      command: "cp -R /usr/local/data_backup {{ mysql_data_dir }}"
+      command: "cp -R /usr/local/data_backup {{ mysql_data_dir_clean }}"
       register: cpbak
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Change ownership of /var/lib/mysql to mysql:mysql
       file:
-        path: "{{ mysql_data_dir }}"
+        path: "{{ mysql_data_dir_clean }}"
         owner: mysql
         group: mysql
         recurse: yes
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Change permissions of /var/lib/mysql to 755
       file:
-        path: "{{ mysql_data_dir }}"
+        path: "{{ mysql_data_dir_clean }}"
         mode: '0755'
         recurse: yes
+      when: "'RedHat' in ansible_distribution"   
 
     - name: reload daemon
       command: "sudo systemctl daemon-reload"
       register: daemon
+      when: "'RedHat' in ansible_distribution"   
 
     - name: Start MySQL service
       service:
         name: mysqld
         state: started
+      when: "'RedHat' in ansible_distribution"   
     
     # - name: restart mysqld
     #   command: "sudo systemctl restart mysqld"
@@ -114,15 +242,19 @@
     - name: chkstatus
       command: "sudo systemctl status mysqld"
       register: statuschk
+      when: "'RedHat' in ansible_distribution"   
 
     - name: check status
       debug:
         var: statuschk
+      when: "'RedHat' in ansible_distribution"   
 
-    - name: Run MySQL upgrade
-      command: "{{ mysql_install_dir }}/bin/mysql_upgrade -u root -h 127.0.0.1 -P 3306"
-      register: upgrade_result
+    # - name: Run MySQL upgrade
+    #   command: "{{ mysql_install_dir }}/bin/mysql_upgrade -u root -h 127.0.0.1 -P 3306"
+    #   register: upgrade_result
+    #   when: "'RedHat' in ansible_distribution"   
 
-    - name: Display upgrade result
-      debug:
-        var: upgrade_result.stdout_lines
+    # - name: Display upgrade result
+    #   debug:
+    #     var: upgrade_result.stdout_lines
+    #   when: "'RedHat' in ansible_distribution"   

@@ -7,10 +7,10 @@
   vars:
     installername: postgresqlinstall.exe
     urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
-    fileurlrhel7: http://172.19.2.98/patches/rhel7.tar.gz
-    fileurlrhel8: http://172.19.2.98/patches/rhel8.tar.gz
-    fileurlrhel9: http://172.19.2.98/patches/rhel9.tar.gz
-    dest: /var/lib
+    # fileurlrhel7: http://172.19.2.98/patches/rhel7.tar.gz
+    # fileurlrhel8: http://172.19.2.98/patches/rhel8.tar.gz
+    # fileurlrhel9: http://172.19.2.98/patches/rhel9.tar.gz
+    # dest: /var/lib
     service_pattern: postgresql
   tasks:
     - name: Gather system facts
@@ -243,23 +243,23 @@
       when: "'RedHat' in ansible_distribution"
     
 
-    - name: remove local repo 1
-      shell: rm -rf /var/local_repo
-      args:
-        chdir: '{{ basedirlnx }}'
-      when: "'RedHat' in ansible_distribution"
+    # - name: remove local repo 1
+    #   shell: rm -rf /var/local_repo
+    #   args:
+    #     chdir: '{{ basedirlnx }}'
+    #   when: "'RedHat' in ansible_distribution"
 
-    - name: remove local repo 2
-      shell: rm -rf /etc/yum.repos.d/LocalRepo.repo
-      args:
-        chdir: '{{ basedirlnx }}'
-      when: "'RedHat' in ansible_distribution"
+    # - name: remove local repo 2
+    #   shell: rm -rf /etc/yum.repos.d/LocalRepo.repo
+    #   args:
+    #     chdir: '{{ basedirlnx }}'
+    #   when: "'RedHat' in ansible_distribution"
       
-    - name: repolist yum
-      shell: yum repolist
-      args:
-        chdir: '{{ basedirlnx }}'
-      when: "'RedHat' in ansible_distribution"
+    # - name: repolist yum
+    #   shell: yum repolist
+    #   args:
+    #     chdir: '{{ basedirlnx }}'
+    #   when: "'RedHat' in ansible_distribution"
 
     #Windows Host Script
 
