@@ -112,26 +112,26 @@
         var: mysql_data_dir[0]
       when: "'RedHat' in ansible_distribution"   
 
-    - name: Create .my.cnf for MySQL root user with credentials
-      copy:
-        dest: /root/.my.cnf
-        content: |
-          [client]
-          user = root
-          password = P@ssw0rdnh2
-        owner: root
-        group: root
-        mode: '0600'
-      when: "'RedHat' in ansible_distribution"   
+    # - name: Create .my.cnf for MySQL root user with credentials
+    #   copy:
+    #     dest: /root/.my.cnf
+    #     content: |
+    #       [client]
+    #       user = root
+    #       password = P@ssw0rdnh2
+    #     owner: root
+    #     group: root
+    #     mode: '0600'
+    #   when: "'RedHat' in ansible_distribution"   
 
 
-    - name: Ensure the .my.cnf file has correct permissions
-      file:
-        path: /root/.my.cnf
-        owner: root
-        group: root
-        mode: '0600'
-      when: "'RedHat' in ansible_distribution"   
+    # - name: Ensure the .my.cnf file has correct permissions
+    #   file:
+    #     path: /root/.my.cnf
+    #     owner: root
+    #     group: root
+    #     mode: '0600'
+    #   when: "'RedHat' in ansible_distribution"   
 
     - name: Stop MySQL service
       service:
