@@ -1,12 +1,265 @@
 - name: Get SQL Server version from Windows Registry
   hosts: winsqlserver  # Replace with your actual Windows host group
   gather_facts: yes
+  vars:
+    sql_instance: "localhost"  # Replace with the actual SQL Server instance
+    sql_user: "sa"  # Replace with a valid SQL Server username
+    sql_password: "Automation@123"  # Replace with a valid password
+    testpath: "C:\\Program Files\\Microsoft SQL Server\\MSSQL15.MSSQLSERVER\\MSSQL\\Log\\"
   tasks:
-    - name: Check SQL Server version from alternative path
-      win_shell: |
-        Get-ChildItem -Path 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server' -Recurse |
-        ForEach-Object { Get-ItemProperty -Path $_.PSPath | Select-Object -Property PSPath, * }
-      register: currentversion
+    - name: get instance name microsoft sql server 
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL'
+        state: present
+      register: registry_check
+      when: "'Windows' in ansible_distribution"
 
     - debug:
-        var: currentversion.stdout_lines
+        msg: "{{ registry_check.properties['MSSQLSERVER']['value'] }}"
+
+    - name: set instance
+      set_fact:
+        sqlserverinstance: "{{ registry_check.properties['MSSQLSERVER']['value'] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: setvariable
+      set_fact:
+        getsqlnumber: "{{ sqlserverinstance }}"
+        patchinfo: 'N/A'
+      when: 
+        - "'Windows' in ansible_distribution"
+    
+    - debug:
+        msg: "{{ getsqlnumber }}"
+
+    
+    - name: get sql server version 
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\{{ sqlserverinstance }}\MSSQLServer\CurrentVersion'
+        state: present
+      register: updatelvl
+      when: "'Windows' in ansible_distribution"
+
+    - name: get installeddir
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\{{ sqlserverinstance }}\Setup'
+        state: present
+      register: installdir
+      when: "'Windows' in ansible_distribution"
+    
+    
+    - name: setvariable
+      set_fact:
+        productupdatelevel: "{{ updatelvl.properties['CurrentVersion']['value'] }}"
+        bindir: "{{ installdir.properties['SqlProgramDir']['raw_value'] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+  
+    
+    
+    - name: Convert backslashes to slashes using PowerShell
+      win_shell: |
+        $Path = "{{ bindir | replace('"', '\"') }}"
+        $ConvertedPath = $Path -replace '\\', '/'
+        Write-Output $ConvertedPath
+      register: converted_path_output
+
+    - name: Display converted path
+      debug:
+        msg: "Converted path: {{ converted_path_output.stdout }}"
+
+    - name: setvariable 2
+      set_fact:
+        sqlserverinstalldir: "{{ converted_path_output.stdout | regex_replace('\\r\\n', '') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: chk
+      debug:
+        var: sqlserverinstalldir
+    
+    - name: Get Version 
+      win_shell: |
+         $paths = @(
+          "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\{{ sqlserverinstance }}\Setup"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path $path) {
+              $productName = (Get-ItemProperty -Path $path).Edition
+              $productVersion = (Get-ItemProperty -Path $path).Version
+              "$productName"
+              break
+            }
+          }  
+
+      register: productinfo
+
+    - name: Get middle two characters
+      set_fact:
+        mainver: "{{ sqlserverinstance[5:7] }}"  # Start at index 3 and take 2 characters
+
+    - name: Display extracted middle characters
+      debug:
+        msg: "Extracted middle characters: {{ productinfo }}"
+    
+    - name: Determine result based on conditions
+      set_fact:
+        sqlreleasever: >-
+          {% if mainver == "15" %}
+          MSSQL 2019
+          {% elif mainver == "14" %}
+          MSSQL 2017
+          {% elif mainver == "13" %}
+          MSSQL 2016
+          {% elif mainver == "12" %}
+          MSSQL 2014
+          {% else %}
+          No conditions met
+          {% endif %}
+
+
+
+    - name: set release level 
+      set_fact:
+        dbversion: "{{ sqlreleasever}} {{ productinfo.stdout | regex_replace('\\r\\n', '') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+    
+    - name: Display result
+      debug:
+        msg: "Result: {{ dbversion }}"
+   
+    - name: Get distinct KB numbers from SQL Server ERRORLOGs
+      win_shell: |
+        $sqlLogPath = "{{ testpath }}"
+        Get-ChildItem -Path $sqlLogPath -Filter "ERRORLOG*" | ForEach-Object {
+            Select-String -Path $_.FullName -Pattern "KB\d+" | ForEach-Object {
+                $_.Matches.Value
+            }
+        } | Select-Object -Unique
+      register: patchlist
+      args:
+        executable: powershell
+
+    - name: Show distinct KB numbers
+      debug:
+        var: patchlist.stdout_lines
+
+    - name: Concatenate the values into one line
+      set_fact:
+        patchinfo: "{{ patchlist.stdout_lines | join(';') }}"
+      when: patchlist.stdout_lines | length > 0
+    
+    - name: Display result
+      debug:
+        msg: "patch: {{ patchinfo }}"
+    
+
+    - name: Get installed SQL Server instances
+      win_shell: |
+        $sql_instances = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server" | Where-Object { $_.Name -match "MSSQL\d+" }
+        $instances = $sql_instances.PSChildName
+        $instances
+      register: sql_instances
+
+    - name: Count the number of instances
+      debug:
+        msg: "Number of SQL Server instances: {{ sql_instances.stdout_lines | length }}"
+
+    - name: Check directories for database files (indirect count)
+      win_shell: |
+        $sql_data_dirs = @()
+        foreach ($instance in $instances) {
+          $instance_data_dir = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instance\MSSQLServer\CurrentVersion").SQLData
+          $sql_data_dirs += $instance_data_dir
+        }
+        $sql_data_dirs
+      register: sql_data_dirs
+
+    - name: Display SQL Server data directories (may contain databases)
+      debug:
+        msg: "SQL Server data directories: {{ sql_data_dirs.stdout_lines }}"
+    
+    - name: Run wmic to get disk size and free space in bytes (Windows)
+      win_shell: |
+        wmic logicaldisk where "DeviceID='C:'" get Size,FreeSpace /format:value   
+      register: disk_info
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Extract FreeSpace and Size values safely (Windows)
+      set_fact:
+        free_space_raw: "{{ disk_info.stdout | regex_search('FreeSpace=([0-9]+)', '\\1') }}"
+        size_raw: "{{ disk_info.stdout | regex_search('Size=([0-9]+)', '\\1') }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Clean and convert FreeSpace and Size to integers
+      set_fact:
+        free_space: "{{ free_space_raw | default('0') | regex_replace('\\D', '') | int }}"
+        size: "{{ size_raw | default('0') | regex_replace('\\D', '') | int }}"
+
+    - name: Convert FreeSpace and Size to GB
+      set_fact:
+        free_space_gb: "{{ free_space | float / 1024 / 1024 / 1024 | round(2) }}"
+        size_gb: "{{ size | float / 1024 / 1024 / 1024 | round(2) }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display FreeSpace and Size in GB
+      debug:
+        msg: "FreeSpace: {{ free_space_gb | float |round(2) }} GB, Size: {{ size_gb | float | round(2) }} GB"
+      when: "'Windows' in ansible_distribution"
+    
+     
+    - name: Create a temporary Python script file (Windows)
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            ts.authenticate("admin", "nh2123")
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'MSSQL_isClustered':'No', 'MSSQL_Space':'{{ free_space_gb | float |round(2) }} GB','MSSQL_TotalDB':'{{ sql_instances.stdout_lines | length }}', 'MSSQL_DBVersion':'{{ dbversion }}', 'MSSQL_PatchLevel':'{{ patchinfo }}', 'MSSQL_ProductUpdateLevel': '{{ productupdatelevel }}', 'MSSQL_DBInstance':'{{ sqlserverinstance }}', 'MSSQL_BinPath': '{{ sqlserverinstalldir }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+ 
+    - name: Execute the Python script (Windows)
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr.py
+      register: result
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the output (Windows)
+      debug:
+        var: result.stdout
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script (Windows)
+      win_file:
+        path: C:\pushcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+

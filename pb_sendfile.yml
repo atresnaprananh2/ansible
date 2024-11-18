@@ -1,16 +1,21 @@
-- hosts: postgretestsvr #change with all for SA
+- hosts: win2 #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
+  # remote_user: root #remove when running on SA Client
+  # become: true #remove when running on SA Client
+  # become_user: root #remove when running on SA Client
   vars:
-    - fileurl: http://172.19.2.98/patches/rhel8.tar.gz
+    - fileurl: http://172.19.2.98/patches/postgresql-15.8-1-windows-x64.exe
     - dest: /var/lib
-   
+    - installername: "postgresql-15.8-1-windows-x64.exe"
   tasks:
-    - name: Prerequisite --- download patch file
-      get_url:
-        url: '{{ fileurl }}'
-        dest: "{{ dest }}"
+    # - name: Prerequisite --- download patch file
+    #   get_url:
+    #     url: '{{ fileurl }}'
+    #     dest: "{{ dest }}"
+    - name: Download PostgreSQL 16 installer (windows)
+      win_get_url:
+        url: "{{ fileurl }}"
+        dest: C:\{{ installername }}
+      # when: "'Windows' in ansible_distribution"
      

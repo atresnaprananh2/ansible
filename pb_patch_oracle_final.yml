@@ -1,0 +1,688 @@
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        minimum_required_opatch_version: "{{ custattr.oracle_minimum_required_opatch_version }}"
+        oracle_prep_patch_dir: "/opt/opsware/Patching/"
+        ansible_patches_dir: "/opt/opsware/Ansiblepatch/"
+        oracle_script_prep: "/opt/opsware/Ansiblepatch/"
+        opatch_latest_zip: "{{ custattr.opatchname }}"
+        opatch_latest_zip_id: "{{ custattr.opatchid }}"
+        pexpectinstaller: "pexpect-3.3.tar.gz"
+        pexpectinstaller_id: "877560001"
+        prepscripts: "requiredscripts.zip"
+        prepscripts_id: "877580001"
+        oneoff_latest_zip: "{{ custattr.patchname }}"
+        oneoff_latest_zip_id: "{{ custattr.patchid }}"
+        patchcode: "{{ custattr.patchcode }}"
+        oneoff_patch_dir: "{{ custattr.oracle_oneoffpatchdir }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 2
+      set_fact:
+        oneoff_patch_dir_int: '{{ oneoff_patch_dir | replace("p", "", 1) }}'
+        listener_file_path: '{{ oracle_script_prep }}/listenerOutput'
+      when: "'RedHat' in ansible_distribution"
+
+    #discovery start
+    - name: Find the path oracle home  (linux)
+      command: grep -E '^[^#]' /etc/oratab
+      register: oraclehomeinfo
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: check latest version  (linux)
+      debug:
+        var: oraclehomeinfo.stdout.split(':')[1]
+      when: "'RedHat' in ansible_distribution"
+
+    
+    - name: Set fact oratab (linux)
+      set_fact:
+        oracle_home_path: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
+        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
+        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
+        byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
+        osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
+      when: "'RedHat' in ansible_distribution"
+
+  
+
+    - name: "Get Oracle Version"
+      command: sudo -u oracle bash -c '. ~/.bash_profile;sqlplus -v'
+      register: oracleversion
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: check oracle version  (linux)
+      debug:
+        var:   " oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') "
+       
+      when: "'RedHat' in ansible_distribution"
+
+
+
+    - name: "Get Opatch Version"
+      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oracle_home_path }}/OPatch/opatch version'
+      register: opatchversion
+      when: "'RedHat' in ansible_distribution"
+
+    - name: check opatch version  (linux)
+      debug:
+        var: "opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '')"
+      when: "'RedHat' in ansible_distribution"
+
+  
+    - name: Set fact version (linux)
+      set_fact:
+        oraver: "{{ oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') }}"
+        opatchver: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Extract major Oracle version
+      set_fact:
+        oracle_binary_version: "{{ oraver | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
+        opatch_version_int: '{{ opatchver | replace(".", "") }}'
+
+    - name: get binary version
+      set_fact:
+        oracle_binary_version_int: '{{ oracle_binary_version | replace(".", "") }}'
+
+    - name: Check ownership of known Oracle directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: oracle_dir_info
+      with_items:
+        - "/u01/app/oracle"
+        - "/opt/oracle"
+        - "/home/oracle"
+      ignore_errors: yes
+
+    - name: Identify the user owning Oracle directories
+      set_fact:
+        oracle_os_user: "{{ oracle_dir_info.results | selectattr('stat.exists', 'equalto', true) | map(attribute='stat.pw_name') | first }}"
+      when: oracle_dir_info.results | selectattr('stat.exists', 'equalto', true) | list | length > 0
+
+    - name: Check for running Oracle processes
+      ansible.builtin.shell: "ps -eo user,comm | grep pmon | awk '{print $1}' | uniq"
+      register: oracle_process_user
+      ignore_errors: yes
+
+    - name: Set fact for Oracle process user if Oracle directories not found
+      set_fact:
+        oracle_os_user: "{{ oracle_process_user.stdout_lines[0] }}"
+      when: oracle_os_user is not defined and oracle_process_user.stdout_lines | length > 0
+
+    - name: Search for Oracle environment variables in all users
+      ansible.builtin.shell: "cat /etc/passwd | cut -d: -f1 | xargs -n 1 -I {} bash -c 'echo User: {} && sudo -u {} env | grep ORACLE_HOME' | grep User"
+      register: oracle_env_user
+      ignore_errors: yes
+
+    - name: Set fact for Oracle environment user if not already found
+      set_fact:
+        oracle_os_user: "{{ oracle_env_user.stdout | regex_findall('User: (.+)') | first }}"
+      when: oracle_os_user is not defined and oracle_env_user.stdout | length > 0
+
+    - name: Display Oracle OS user
+      debug:
+        msg: "Oracle OS User: {{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}"
+
+    - name: Run ps command and grep for tnslsnr
+      shell: ps -ef | grep tnslsnr | grep -v grep
+      register: ps_output
+
+    - name: Extract tnslsnr path
+      shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
+      register: tnslsnr_path
+
+    - name: Display tnslsnr executable path without newline
+      debug:
+        msg: |
+          {% if tnslsnr_path.stdout != "" %}
+            The Oracle listener executable (tnslsnr) path is: {{ tnslsnr_path.stdout }}
+          {% else %}
+            tnslsnr executable not found.
+          {% endif %}
+
+    - name: Extract listener name from process details
+      set_fact:
+        listenername: "{{ ps_output.stdout | regex_search('tnslsnr\\s+(\\S+)') | replace('tnslsnr ', '') | trim }}"
+
+    - name: Display listener name
+      debug:
+        msg: "The Oracle listener name is: {{ listenername }}"
+
+    #end of discovery
+    - name: "Prerequisite --- Check that supplied oracle_home_path ({{ oracle_home_path }}) exists - if not fail the play"
+      command: cd '{{ oracle_home_path }}'
+      changed_when: no
+      tags:
+        - prerequisite
+        - prep
+        
+    - name: Prerequisite --- check installation path
+      stat:
+        path: "{{ oracle_prep_patch_dir }}"
+      register: pathchk
+
+    - name: Prerequisite --- create directory installer
+      command: mkdir {{ oracle_prep_patch_dir }}
+      when: not pathchk.stat.exists
+
+    - name: Prerequisite --- check patch exist
+      stat:
+        path: "{{ oracle_prep_patch_dir }}/{{ oneoff_latest_zip }}"
+      register: patchchk
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{oneoff_latest_zip_id}},None,None,'{{oneoff_latest_zip}}', None, '{{oracle_prep_patch_dir}}'))
+      register: test
+      when: not patchchk.stat.exists
+      tags: download,remote
+
+    - name: Prerequisite --- check opatch exist
+      stat:
+        path: "{{ oracle_prep_patch_dir }}/{{ opatch_latest_zip }}"
+      register: opatchchk
+
+    - name: Prerequisite --- download opatch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{opatch_latest_zip_id}},None,None,'{{opatch_latest_zip}}', None, '{{oracle_prep_patch_dir}}'))
+      register: test
+      when: not patchchk.stat.exists
+      tags: download,remote
+
+    - name: "Prerequisite --- Check that the required oracle patches ({{ opatch_latest_zip }}, {{ oneoff_latest_zip }}) exist on the system - if not fail the play"
+      file:
+        path: '{{ oracle_prep_patch_dir }}/{{ item }}'
+        state: file
+      with_items:
+        - '{{ opatch_latest_zip }}'
+        - '{{ oneoff_latest_zip }}'
+      tags:
+        - prerequisite
+        - prep
+
+    - name: "Prerequisite --- Check that python version ({{ ansible_python_version }}) >= v2.6 - if not fail the play"
+      fail: 
+        msg: "The version of python does not meet the minumum requirements (>= v2.6) to run this Ansible content"
+      when: ansible_python_version == "" or (ansible_python_version is version_compare('2.6', '<'))
+      tags:
+        - prerequisite
+        - prep
+
+    - name: "Prerequisite --- Create the Ansible patching directory ({{ ansible_patches_dir }})"
+      file:
+        path: '{{ ansible_patches_dir }}'
+        state: directory
+        owner: oracle
+        mode: "u+rwx,g+rwx,o+rwx"
+      tags:
+        - prerequisite
+        - prep
+    
+    - name: Prerequisite --- get Scripts
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ prepscripts_id }},None,None,'{{ prepscripts }}', None, '{{ ansible_patches_dir }}'))
+      tags: download,remote
+   
+    - name: "Prerequisite --- unzip scripts"
+      command: unzip {{ prepscripts }}
+      args:
+        chdir: '{{ ansible_patches_dir }}'
+      tags:
+        - prerequisite
+        - prep
+    
+    - name: "Prerequisite --- move scripts"
+      shell: sudo mv {{ ansible_patches_dir }}requiredscripts/* {{ ansible_patches_dir }}
+      args:
+        chdir: '{{ ansible_patches_dir }}'
+      tags:
+        - prerequisite
+        - prep
+
+
+    - name: "Prerequisite --- Fetch Oracle SIDs"
+      command: /bin/bash oracleSidEnvironment.sh
+      args:
+        chdir: '{{ ansible_patches_dir }}'
+      register: oracleSidList
+      tags:
+        - prerequisite
+        - prep
+   
+    
+    - name: "Prerequisite --- check pexpect"
+      command: "{{ ansible_python_interpreter }} -c 'import pexpect'"
+      changed_when: no
+      register: result
+      ignore_errors: true
+      tags:
+        - prerequisite
+        - prep
+    
+    - name: Prerequisite --- get pexpect installer
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ pexpectinstaller_id }},None,None,'{{ pexpectinstaller }}', None, '{{ ansible_patches_dir }}'))
+      when: result.failed == true
+      tags: download,remote
+
+    - name: Prerequisite --- execute pexpect installer
+      command: sh {{ ansible_patches_dir }}installpexpect.sh
+      register: output2
+      when: result.failed == true
+
+    - name: "Prerequisite --- Check for the existence of pexpect - if not fail the play"
+      command: "{{ ansible_python_interpreter }} -c 'import pexpect'"
+      changed_when: no
+      register: pexpect
+      tags:
+        - prerequisite
+        - prep
+
+    - name: "Step 1 --- Check for presence of known files  - copy them to the Ansible patching directory"
+      copy:
+        src: '{{ oracle_prep_patch_dir }}/{{ item }}'
+        dest: '{{ ansible_patches_dir }}'
+        mode: "u+rwx,g+rwx,o+rwx"
+        owner: oracle
+        remote_src: yes
+      with_items:
+        - '{{ opatch_latest_zip }}'
+        - '{{ oneoff_latest_zip }}'
+      tags:
+        - prerequisite
+        - prep
+
+    - name: "Step 1a --- Make sure all the patching software is downloaded and available in ({{ oracle_prep_patch_dir }}) "
+      command: ls -l {{ oracle_prep_patch_dir }}
+      register: oracle_prep_patch_dir_content
+      changed_when: no
+      tags:
+        - prep
+
+      
+    - name: "Step 2 --- Print the Ansible variables for Oracle Binary Version and Oracle Home Path"
+      debug:
+        msg: '{{ item }}' 
+      with_items:
+        - '"The entered Oracle Binary Version is {{ oracle_binary_version }}"'
+        - '"The entered Oracle Home Path is {{ oracle_home_path }}"'
+      tags:
+        - debug
+        - prep
+
+    - name: "Step 3 --- Print the environment variable Oracle Home Path"
+      shell: 'echo $ORACLE_HOME'
+      changed_when: no
+      tags:
+        - debug
+        - prep
+
+    - name: "Step 4 --- Do some debugging"
+      shell: 'echo {{ item }}'
+      changed_when: no
+      with_items:
+        - '$ORACLE_SID'
+        - '$ORACLE_HOME'
+      args:
+        chdir: '{{ oracle_script_prep }}'
+      tags:
+        - debug
+        - prep
+
+    - name: "Step 5 --- Run the utlrp on all databases"
+      command: sh "run_utlrp.sh"
+      remote_user: oracle
+      become_user: oracle
+      args:
+        chdir: '{{ oracle_script_prep }}'
+      tags:
+        - prep
+
+    - name: "Step 6 --- Print the value of the minimum required OPatch version specified"
+      debug:
+        msg: "The value of the minimum required OPatch version is {{ minimum_required_opatch_version }}"
+      tags:
+        - debug
+        - prep
+
+        
+    - name: "Step 7 --- Check the current value for $PATH before resetting it"
+      shell: 'echo $PATH'
+      changed_when: no
+      tags:
+        - debug
+        - prep
+
+    - name: "Step 8 --- Find the OPatch directory"
+      file: 
+        path: '{{ oracle_home_path }}/OPatch'
+        state: directory
+      register: opatch_dir_check
+      changed_when: no
+      tags:
+        - prep
+
+    - name: "Step 9 --- Check the system version of OPatch"
+      command: "sh {{ ansible_patches_dir }}/opatchrun.sh"
+      register: system_opatch_version
+      when: opatch_dir_check.failed == false
+      tags:
+        - prep
+
+    - name: "Step 10 --- Parse system_opatch_version output register to contain only necessary characters"
+      set_fact:
+        system_opatch_version: '{{ system_opatch_version.stdout_lines[0] | replace("OPatch Version: ", "") }}'
+      tags:
+        - prep
+        
+    - name: "Step 11 --- Print the value of the minimum required OPatch version, again"
+      debug:
+        msg: "The value of the minimum required OPatch version is {{ minimum_required_opatch_version }}"
+      tags:
+        - debug
+        - prep
+        
+    - name: "Step 12 --- Print the parsed system value of OPatch version"
+      debug:
+        msg: "The systems's value of the OPatch version is {{ system_opatch_version }}"
+      tags:
+        - debug
+        - prep
+      
+    - block:
+        
+
+        - name: Step 13 --- rename opatch dir
+          command: "mv {{ oracle_home_path }}/OPatch {{ oracle_home_path }}/OPatch_bak"
+
+
+        - name: Step 14 --- Install the latest OPatch ({{ opatch_latest_zip }})
+          ansible.builtin.unarchive:
+            src: '{{ ansible_patches_dir }}{{ opatch_latest_zip }}'
+            dest: '{{ oracle_home_path }}'
+            remote_src: yes
+            keep_newer: true 
+            owner: oracle
+        
+      when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
+
+      rescue:
+        - name: "Rescue --- Inform {{ email_distribution_group }} of a failed attempt at installing the minimum required opatch version on {{ ansible_hostname }}"
+          mail:
+            subject: "Ansible Oracle Patching failed on {{ ansible_fqdn }} (Job #{{ tower_job_id }})"
+            host: '{{ email_server }}'
+            body: 'Applying {{ opatch_latest_zip }} failed. The system opatch utility was not upgraded to the minimum required utility version. Please remediate and rerun the Ansible content.'
+            from: AUTOMATED_TOWER_NOTIFICATION@ansible.com
+            to: '{{ email_distribution_group }}'
+          become: false
+          delegate_to: "{{ groups['tower_server'][0] }}"
+        - name: "Rescue --- Intentionally fail the play"
+          fail:
+            msg: 'Updating the opatch version to the minimum required version failed. {{ email_distribution_group }} has been notified for further investigation.'  
+      tags:
+        - prep
+
+
+    - name: "Step 15 --- Obtain the list of patches installed in current $ORACLE_HOME"
+      command: sh {{ ansible_patches_dir }}opatchlsinventory.sh
+      register: chkpatch
+      tags:
+        - prep
+    - name: Step 16 --- check patch result
+      debug:
+        msg:
+          - "{{chkpatch}}"
+
+
+    - name: "Step 17 --- Verify replace filter works as expected"
+      debug:
+        msg: '{{ item }}'
+      with_items:
+        - "The value of oneoff_latest_zip is: '{{ oneoff_latest_zip }}'"
+        - "The value of oneoff_patch_dir is: '{{ oneoff_patch_dir }}'"
+        - "The value of oneoff_patch_dir_int is: '{{ oneoff_patch_dir_int }}'"
+      tags:
+        - debug
+        - prep
+      
+    #Using absolute paths because documentation has several manual directory changes to keep track of
+    - block:
+        - name: "Step 18 --- Check for one-off patch conflicts"
+          file:
+            path: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}'
+            state: directory
+            owner: oracle
+
+        - name: "Step 19 --- Check for one-off patch conflicts"
+          copy: 
+            src: '{{ ansible_patches_dir }}/{{ oneoff_latest_zip }}'
+            dest: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}'
+            remote_src: yes
+            owner: oracle
+        - name: "Step 20 --- Check for one-off patch conflicts"
+          unarchive: 
+            src: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_latest_zip }}'
+            dest: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}'
+            list_files: yes
+            owner: oracle
+            remote_src: yes
+      
+      rescue:
+        - name: "Rescue --- Inform {{ email_distribution_group }} of One-off patch conflicts that must be remedied prior to patching on {{ ansible_hostname }}"
+          mail:
+            subject: "Ansible Oracle Patching failed on {{ ansible_fqdn }} (Job #{{ tower_job_id }})"
+            host: '{{ email_server }}'
+            body: 'One-off patch conflicts will prevent Ansible from patching {{ oracle_home_path }}. Please download the appropriate One-off conflict patches and rerun the Ansible content once the conflicts have been resolved.'
+            from: AUTOMATED_TOWER_NOTIFICATION@ansible.com
+            to: '{{ email_distribution_group }}'
+          become: false
+          delegate_to: "{{ groups['tower_server'][0] }}"
+        - name: "Rescue --- Intentionally fail the play"
+          fail:
+            msg: 'One-off patch conflicts will prevent the patching process. {{ email_distribution_group }} has been notified for further investigation.'  
+      tags:
+        - prep
+    - name: "Step 21 --- Make sure ORACLE_HOME is set to correct binaries"
+      shell: echo $ORACLE_HOME
+      changed_when: no
+      tags:
+        - debug
+        - patching 
+
+    - name: "Step 22 --- Identify all of the running listeners"
+      shell: ps -ef | grep lsnr
+      changed_when: no
+      register: listenerOutput
+      tags:
+        - patching
+      
+    - name: "Step 23 --- Make sure the directory for the listeners filedrop exists"
+      file:
+        path: '{{ listener_file_path }}'
+        state: directory
+        owner: oracle
+        mode: "u+rwx,g+rwx,o+rwx"
+      tags:
+        - debug
+        - patching
+    - name: "Step 24 --- Make sure ORACLE_HOME is set to correct binaries"
+      shell: echo $ORACLE_HOME
+      changed_when: no
+      tags:
+        - debug
+        - patching
+   
+    - name: "Step 25 --- Create a file to contain the binary specific SID(s) to iterate over"
+      file:
+        path: '{{ listener_file_path }}/listenerFile.txt'
+        state: '{{ item }}'
+        owner: oracle
+      with_items:
+        - absent
+        - touch
+      tags:
+        - debug
+        - patching
+    
+    
+    - name: "Step 26 --- Debug dynamically added sid fact"
+      debug:
+        msg: "ORACLE_LISTENER_SID: '{{ ORACLE_LISTENER_SID|default([]) }}'"
+      tags:
+        - debug
+        - patching 
+    - name: "Step 27 --- Stop the named listeners from the {{ oracle_binary_version }} home"
+      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl stop {{ listenername }}' 
+        # when: "oracle_binary_version | splitVersion == '12'"
+      tags:
+        - patching
+    - name: "Step 28 --- Shutdown the databases"
+      command: sh '{{ oracle_script_prep }}/stopDatabase.sh'
+      args:
+        chdir: '{{ oracle_script_prep }}'
+      tags:
+        - patching
+    
+   
+    - block:
+        - name: "Step 29 --- Installing Quarterly Security Patch ({{ oneoff_patch_dir_int }})"
+          ansible.builtin.expect:
+            command: sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply' 
+            chdir: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_patch_dir_int }}/{{patchcode}}'
+            responses:
+              (?i)Email: ''
+              (?i)uninformed: 'Y'
+              (?i)proceed: 'y'
+              (?i)patching: 'y'
+            timeout: 1000
+          register: opatchOutput
+            #when: pexpect|succeeded
+      rescue: 
+        - name: "Rescue --- set a fact with the opatchlog location"
+          set_fact:
+            opatch_log_location: '{{ item | opatchLog | trim | replace("\r\n\r\n", "") }}'
+          with_items:
+            - '{{ opatchOutput.stdout }}'
+        - name: "Rescue --- truncate fact to just the filename"
+          set_fact:
+            opatch_log_file: '{{ opatch_log_location | replace("/opt/ora/app/oracle/product/11.2.0.4/cfgtoollogs/opatch/","") }}'
+          when: "oracle_binary_version | splitVersion == '11'" 
+        - name: "Rescue --- truncate fact to just the filename"
+          set_fact:
+            opatch_log_file: '{{ opatch_log_location | replace("/opt/ora/app/oracle/product/12.1.0.2/cfgtoollogs/opatch/","") }}'
+          when: "oracle_binary_version | splitVersion == '12'"
+          
+        - name: "Rescue --- Inform {{ email_distribution_group }} of a failed attempt at patching oracle binaries on {{ ansible_hostname }}"
+          mail:
+            subject: "Ansible Oracle Patching failed to patch {{ oracle_home_path }} on {{ ansible_fqdn }} (Job #{{ tower_job_id }})"
+            host: '{{ email_server }}'
+            body: "Executing 'opatch apply' failed. Please remediate issues logged at ({{ opatch_log_file }} ) and rerun the patching content."
+            from: AUTOMATED_TOWER_NOTIFICATION@ansible.com
+            to: '{{ email_distribution_group }}'
+          become: false
+          delegate_to: "{{ groups['tower_server'][0] }}" 
+        - name: "Rescue -- Intentionally fail the play"
+          fail:
+            msg: 'The opatch apply command failed - the relevant opatch logs have been emailed to {{ email_distribution_group }} for further investigation.'
+      tags:
+        - patching   
+
+    - name: "Step 30 --- Verify all patches have been applied successfully"
+      ansible.builtin.expect:
+        command:  sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+        chdir: '{{ oracle_home_path }}/OPatch'
+        responses:
+          (?i)proceed: 'y'
+      #when: pexpect|succeeded
+      tags:
+        - patching
+    - name: "Step 31 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
+      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl start {{ listenername }}' 
+        #when: "oracle_binary_version | splitVersion == '12'"
+      tags:
+        - patching
+    - name: "Step 32 --- Start the databases"
+      command: sh '{{ oracle_script_prep }}/startDatabase.sh'
+      args:
+        chdir: '{{ oracle_script_prep }}'
+      tags:
+        - patching
+    - name: "Final --- Remove the Ansible patching directory ({{ ansible_patches_dir }})"
+      file:
+        #path instead of src required pre v2.3
+        path: '{{ ansible_patches_dir }}'
+        state: absent
+      tags:
+        - final
+        - post
+    - name: "Final --- Remove the Ansible patching directory  ({{ oracle_prep_patch_dir }})"
+      file:
+        #path instead of src required pre v2.3
+        path: '{{ oracle_prep_patch_dir }}'
+        state: absent
+      tags:
+        - final
+        - post
+
+    
+
+      
+   

@@ -1,0 +1,77 @@
+- name: Patch Microsoft SQL Server 2019
+  hosts: winsqlserver  # Replace with your actual Windows host group
+  gather_facts: yes
+  vars:
+    - patchlink: http://172.19.2.98/patches/sqlserver2019-kb5046365-x64.exe
+    - dest: C:\Temp
+
+  tasks:
+
+
+    - name: Download MySQL Patch
+      win_get_url:
+        url: '{{ patchlink }}'
+        dest: "{{ dest }}"
+    # - name: Ensure the patch file is downloaded
+    #   win_get_url:
+    #     url: "https://example.com/path/to/sqlserver2019-kb5046365-x64.exe"
+    #     dest: "C:\\Temp\\sqlserver2019-kb5046365-x64.exe"
+    #   register: download_status
+
+    - name: Run the SQL Server patch installer silently
+      win_shell: >
+        C:\\Temp\\sqlserver2019-kb5046365-x64.exe /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
+      args:
+        executable: cmd
+      ignore_errors: yes
+      register: install_status
+
+    - name: Check if reboot is required
+      debug:
+        msg: >
+          Installation completed with return code {{ install_status.rc }}.
+          A reboot is {{ 'required' if install_status.rc == 3010 else 'not required' }}.
+
+    - name: Reboot if required
+      win_reboot:
+      when: install_status.rc == 3010
+
+    - name: Confirm reboot status
+      win_shell: "echo System reboot completed."
+      register: post_reboot_status
+      when: install_status.rc == 3010
+
+    # - name: Run SQL Server 2019 patch
+    #   win_command: |
+    #     C:\temp\sqlserver2019-kb5046365-x64.exe /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
+    #   args:
+    #     creates: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log
+    #   ignore_errors: yes
+    #   register: checkinstallation
+
+    # - name: Check SQL Server patch installation log
+    #   win_stat:
+    #     path: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log
+    #   register: patch_log
+
+    # - name: Check if reboot is required
+    #   debug:
+    #     msg: >
+    #       Installation completed with return code {{ checkinstallation.rc }}.
+    #       A reboot is {{ 'required' if checkinstallation.rc == 3010 else 'not required' }}.
+
+    # - name: Reboot if required
+    #   win_reboot:
+    #   when: checkinstallation.rc == 3010
+
+    # - name: Confirm reboot status
+    #   win_shell: "echo System reboot completed."
+    #   register: post_reboot_status
+    #   when: install_status.rc == 3010
+
+    # - name: Verify patch installation was successful
+    #   win_shell: |
+    #     Get-Content -Path "C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log" | Select-String -Pattern "successful"
+    #   # when: patch_log.stat.exists
+    #   register: patch_status
+    #   failed_when: patch_status.stdout | search("successful") == False

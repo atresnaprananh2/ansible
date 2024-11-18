@@ -1,9 +1,6 @@
-- hosts: oracle12
+- hosts: all
   gather_facts: yes
   name: System Discovery
-  remote_user: root
-  become: true
-  become_user: root
   vars: 
     - patch_description: 'No Interim Patch installed'
     - isclustered: 'no'

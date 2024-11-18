@@ -1,4 +1,4 @@
-- hosts: mysqlrhel
+- hosts: mysqlrhel8
   gather_facts: yes
   name: System Discovery
   remote_user: root #remove when running on SA Client
@@ -84,11 +84,33 @@
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
+    
+    - name: chk2
+      debug:
+        var: mysqlversion.stdout
+      when: "'RedHat' in ansible_distribution"
 
     - name: Extract MySQL version number
       set_fact:
-        mysql_version: "{{ mysqlversion.stdout | regex_search('Distrib ([0-9.]+)', '\\1') }}"
+        mysql_version5: "{{ mysqlversion.stdout | regex_search('Distrib ([0-9.]+)', '\\1') }}"
+        mysql_version8: "{{ mysqlversion.stdout | regex_search('Ver\\s([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
       when: "'RedHat' in ansible_distribution"
+
+    - name: Extract MySQL version number 5
+      set_fact:
+        mysql_version: "{{ mysql_version5 }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_version5 | length != 0
+    
+    - name: Extract MySQL version number 8
+      set_fact:
+        mysql_version: "{{ mysql_version8 }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_version8 | length != 0
+
+    
 
     - name: Show the MySQL version
       debug:
@@ -162,7 +184,12 @@
     - name: Set Fact discovery vars (linux)
       set_fact:
         datadirlnx: "{{ mysqldatadir.stdout | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
-      when: "'RedHat' in ansible_distribution"   
+      when: "'RedHat' in ansible_distribution"  
+
+    - name: Display MySQL datadirlinx
+      debug:
+        var: datadirlnx[0]
+      when: "'RedHat' in ansible_distribution" 
 
     - name: get physical data dir content
       shell: |
@@ -220,9 +247,11 @@
     - name: get router info 
       shell: ls -l | grep 'mysql-router'
       register: mysql_router_version
+      ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"
         - (major_ver | int) > 5
+    
     
     - name: Retrieve only the version string router
       set_fact:
@@ -230,10 +259,12 @@
       when: 
         - "'RedHat' in ansible_distribution"
         - (major_ver | int) > 5
+        - mysql_router_version.failed == false
 
     - name: get shell info 
       shell: ls -l | grep 'mysql-shell'
       register: mysql_shell_version
+      ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"
         - (major_ver | int) > 5
@@ -244,6 +275,7 @@
       when: 
         - "'RedHat' in ansible_distribution"
         - (major_ver | int) > 5
+        - mysql_router_version.failed == false
 
     # - name: Execute MySQL command to get database size
     #   shell: |

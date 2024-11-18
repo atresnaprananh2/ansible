@@ -1,9 +1,9 @@
-- hosts: postgre
+- hosts: win2
   gather_facts: yes
   name: System Discovery
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
+  # remote_user: root #remove when running on SA Client
+  # become: true #remove when running on SA Client
+  # become_user: root #remove when running on SA Client
   vars:
     installername: postgresqlinstall.exe
     urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
@@ -392,7 +392,7 @@
         import json
         ts = pytwist.twistserver.TwistServer()
         try:
-            ts.authenticate("aditya", "Nh2server!")
+            ts.authenticate("admin", "nh2123")
             server_service = ts.server.ServerService
             filter = Filter()
             server_refs = server_service.findServerRefs(filter)
