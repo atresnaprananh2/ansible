@@ -1,36 +1,34 @@
-- hosts: oracle19
-  remote_user: oracle
-  become: true
-  become_method: sudo
-  name: Oracle Patch
+- hosts: winsqlserver
  
+  name: testscript
+  gather_facts: yes
+
   tasks:
-    - name: finding python version
-      shell: python3 -V
-      register: pv
-      ignore_errors: true
+    - name: check
+      debug: 
+         var: ansible_facts.interfaces[0]["ipv4"]["address"]
 
-    - name: print result
-      debug:
-        msg:
-          - "{{pv.stdout}}"
-      when: pv.stdout == ""
+    # - name: print result
+    #   debug:
+    #     msg:
+    #       - "{{pv.stdout}}"
+    #   when: pv.stdout == ""
 
-    - name: mkdirtemp
-      command: mkdir /home/oracle/pyinstall
-      when: pv.stdout == ""
+    # - name: mkdirtemp
+    #   command: mkdir /home/oracle/pyinstall
+    #   when: pv.stdout == ""
 
-    - name: add pyinstaller
-      copy:
-        src: /home/user/ansible/installers/Python-3.10.8.tgz
-        dest: /home/oracle/pyinstall/Python-3.10.8.tgz
-      when: pv.stdout == ""
+    # - name: add pyinstaller
+    #   copy:
+    #     src: /home/user/ansible/installers/Python-3.10.8.tgz
+    #     dest: /home/oracle/pyinstall/Python-3.10.8.tgz
+    #   when: pv.stdout == ""
 
-    - name: add cx_oracle installer
-      copy:
-        src: /home/user/ansible/installers/cx_Oracle-7.3.0.tar.gz
-        dest: /home/oracle/pyinstall/cx_Oracle-7.3.0.tar.gz
-      when: pv.stdout == "";
+    # - name: add cx_oracle installer
+    #   copy:
+    #     src: /home/user/ansible/installers/cx_Oracle-7.3.0.tar.gz
+    #     dest: /home/oracle/pyinstall/cx_Oracle-7.3.0.tar.gz
+    #   when: pv.stdout == "";
 
   
    

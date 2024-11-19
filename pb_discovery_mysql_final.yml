@@ -1,9 +1,6 @@
-- hosts: winmysql
+- hosts: all
   gather_facts: yes
   name: System Discovery
-  # remote_user: root #remove when running on SA Client
-  # become: true #remove when running on SA Client
-  # become_user: root #remove when running on SA Client
   vars:   
     needupdates: n
     psqlmode: 'HA-Standby'
