@@ -2,25 +2,96 @@
   hosts: winsqlserver  # Replace with your actual Windows host group
   gather_facts: yes
   vars:
-    - patchlink: http://172.19.2.98/patches/sqlserver2019-kb5046365-x64.exe
     - dest: C:\Temp
 
   tasks:
+   
+    - name: Check if directory exists, if not create it
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: directory
+
+    - name: Create a temporary Python script file get custom attr
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.interfaces[0]["ipv4"]["address"] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        "@
+        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getcustomattr.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
 
 
-    - name: Download MySQL Patch
-      win_get_url:
-        url: '{{ patchlink }}'
-        dest: "{{ dest }}"
-    # - name: Ensure the patch file is downloaded
-    #   win_get_url:
-    #     url: "https://example.com/path/to/sqlserver2019-kb5046365-x64.exe"
-    #     dest: "C:\\Temp\\sqlserver2019-kb5046365-x64.exe"
-    #   register: download_status
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\getcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattrwin: "{{ instattrwin.stdout }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name:  Preparation - set variables
+      set_fact:
+        patchname: "{{ custattrwin.SQLServer_patchname }}"
+        patchid: "{{ custattrwin.SQLServer_patchid }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Download patch file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, r'{{ dest }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfile.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Remove the temporary download file using Python script
+      win_file:
+        path: C:\downloadfile.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
 
     - name: Run the SQL Server patch installer silently
       win_shell: >
-        C:\\Temp\\sqlserver2019-kb5046365-x64.exe /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
+        {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
       args:
         executable: cmd
       ignore_errors: yes
@@ -40,6 +111,11 @@
       win_shell: "echo System reboot completed."
       register: post_reboot_status
       when: install_status.rc == 3010
+
+    - name: Delete directory and its contents
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: absent
 
     # - name: Run SQL Server 2019 patch
     #   win_command: |

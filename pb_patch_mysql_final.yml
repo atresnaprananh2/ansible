@@ -1,0 +1,529 @@
+- name: Patch MySQL RHEL
+  hosts: all 
+  gather_facts: yes
+  name: System Discovery
+  vars:   
+    #change the patch information if needed
+    - mysql_installation_2: {}
+    - mysql_installation: {}
+  tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 1
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        mysql_version: "{{ custattr.MySQL_destinationversion }}"
+        mysql_tarball: "{{ custattr.MySQL_patchname }}"
+        mysql_patchid: "{{ custattr.MySQL_patchid }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - set variables 2
+      set_fact:
+        mysql_destdownload: "/tmp/{{ mysql_tarball }}"
+        mysqlfolder: "{{ mysql_tarball | regex_replace('\\.tar\\.xz$', '') }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Check MySQL installation
+      shell: ". /etc/profile && which mysql"
+      register: mysql_path
+      ignore_errors: yes
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Resolve the real path of mysql  (linux)
+      command: readlink -f "{{ mysql_path.stdout }}"
+      register: mysql_path
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: mysql_path
+      when: "'RedHat' in ansible_distribution"
+      
+    - name: get datadir
+      shell: sudo grep -i 'datadir' /etc/my.cnf
+      register: mysqldatadir
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk2
+      debug:
+        var: mysqldatadir
+      when: "'RedHat' in ansible_distribution"
+     
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ mysql_path.stdout[:-5] }}" 
+      when: "'RedHat' in ansible_distribution"   
+    
+    - name: Set Fact discovery vars clean data dir(linux)
+      set_fact:
+        mysql_data_dir_raw: "{{ mysqldatadir.stdout | replace(' ', '') }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Set Fact discovery vars (linux)
+      set_fact:
+        mysql_data_dir: "{{ mysql_data_dir_raw | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+        mysql_install_dir:  "{{ basedirlnx[:-4] }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Set Fact discovery vars2 (linux)
+      set_fact:
+        mysql_data_dir_clean: "{{ mysql_data_dir[0] }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: chk3
+      debug:
+        var: mysql_data_dir[0]
+      when: "'RedHat' in ansible_distribution"   
+
+    
+
+    - name: Stop MySQL service
+      service:
+        name: mysqld
+        state: stopped
+      when: "'RedHat' in ansible_distribution"   
+
+
+    - name: Backup MySQL data directory
+      command: cp -r {{ mysql_data_dir_clean }} /usr/local/data_backup
+      when: 
+        - "'RedHat' in ansible_distribution"   
+        - mysql_data_dir is defined
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysql_patchid }},None,None,'{{ mysql_tarball }}', None, '/tmp'))
+      register: test
+      when: "'RedHat' in ansible_distribution"   
+      tags: download,remote
+
+   
+
+    - name: Extract MySQL tar.gz
+      unarchive:
+        src: "{{ mysql_destdownload }}"
+        dest: "/opt/"
+        remote_src: yes
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: Remove old MySQL installation
+      command: "rm -rf {{ mysql_install_dir }}"
+      when:
+        - "'RedHat' in ansible_distribution"    
+        - mysql_install_dir is defined
+
+    - name: Move new MySQL installation
+      command: "mv /opt/{{ mysqlfolder }} {{ mysql_install_dir }}"
+      when: "'RedHat' in ansible_distribution"   
+
+
+    - name: Set MySQL ownership
+      command: "chown -R mysql:mysql {{ mysql_install_dir }}"
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: Initialize MySQL data directory
+      command: "{{ mysql_install_dir }}/bin/mysqld --initialize-insecure --user=mysql --datadir={{ mysql_data_dir_clean }}"
+      args:
+        creates: "{{ mysql_data_dir_clean }}/mysql"
+      when: "'RedHat' in ansible_distribution"   
+
+    
+    - name: remove installed data
+      command: "rm -rf {{ mysql_data_dir_clean }}"
+      register: rmv
+      when: "'RedHat' in ansible_distribution"   
+      
+    
+    - name: copy old data
+      command: "cp -R /usr/local/data_backup {{ mysql_data_dir_clean }}"
+      register: cpbak
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: Change ownership of /var/lib/mysql to mysql:mysql
+      file:
+        path: "{{ mysql_data_dir_clean }}"
+        owner: mysql
+        group: mysql
+        recurse: yes
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: Change permissions of /var/lib/mysql to 755
+      file:
+        path: "{{ mysql_data_dir_clean }}"
+        mode: '0755'
+        recurse: yes
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: reload daemon
+      command: "sudo systemctl daemon-reload"
+      register: daemon
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: Start MySQL service
+      service:
+        name: mysqld
+        state: started
+      when: "'RedHat' in ansible_distribution"   
+    
+    # - name: restart mysqld
+    #   command: "sudo systemctl restart mysqld"
+    #   register: statuschk
+
+    - name: chkstatus
+      command: "sudo systemctl status mysqld"
+      register: statuschk
+      when: "'RedHat' in ansible_distribution"   
+
+    - name: check status
+      debug:
+        var: statuschk
+      when: "'RedHat' in ansible_distribution"   
+    
+    #windows script
+    - name: Create a temporary Python script file get custom attr
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.interfaces[0]["ipv4"]["address"] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        "@
+        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getcustomattr.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\getcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattrwin: "{{ instattrwin.stdout }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name:  Preparation - set variables
+      set_fact:
+        patchname: "{{ custattrwin.MySQL_Patchname }}"
+        mysqlpatchid: "{{ custattrwin.MySQL_Patchid }}"
+        patchfolder: "{{ custattrwin.MySQL_Patchfolder }}"
+        productid: "{{ custattrwin.MySQL_productid }}"
+        userdir: "{{ custattrwin.MySQL_userdir }}"
+      when: "'Windows' in ansible_distribution"
+
+
+    
+
+    - name: Validate if WOW6432Node registry key exists for x86 detection
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
+        state: present
+      register: registry_check
+      when: "'Windows' in ansible_distribution"
+
+    - name: Output registry check result
+      debug:
+        var: registry_check.exists
+      when: "'Windows' in ansible_distribution"
+   
+
+    - name: Get MySQL installation base directory from registry (windows x64)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB
+      register: mysql_installation64
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+
+   
+    
+    - name: initial check if any router exist 
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[1] }}
+      register: isanyrouter
+      ignore_errors: yes 
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x64) without router
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[0] }}
+      register: mysql_installation_264
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+        - isanyrouter.failed == true 
+
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x64) with router
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[1] }}
+      register: mysql_installation_264_withrouter
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists"
+        - isanyrouter.failed == false 
+
+    - name: Get MySQL installation base directory from registry (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB
+      register: mysql_installation86
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB\{{ mysql_installation86.sub_keys[0] }}
+      register: mysql_installation_286
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+
+    - name: set path x64 1
+      set_fact:
+        mysql_installation: "{{ mysql_installation64 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists" 
+        
+    - name: set path x64 2
+      set_fact:
+        mysql_installation_2: "{{ mysql_installation_264_withrouter }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists" 
+        - isanyrouter.failed == false 
+    - name: set path x64 3
+      set_fact:
+        mysql_installation_2: "{{ mysql_installation_264 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "not registry_check.exists" 
+        - isanyrouter.failed == true 
+
+    - name: set path x86
+      set_fact:
+        mysql_installation: "{{ mysql_installation86 }}"
+        mysql_installation_2: "{{ mysql_installation_286 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registry_check.exists"
+
+    
+
+    - name: Set fact base dir (windows)
+      set_fact:
+        
+        dataloc: "{{ mysql_installation_2.properties['DataLocation']['value']  }}"
+        binloc: "{{ mysql_installation_2.properties['Location']['value'][:-1]  }}"
+        mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
+      when: "'Windows' in ansible_distribution"
+
+    
+   
+
+    # - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
+    #   ansible.builtin.win_shell: |
+    #     $content = @"
+    #     [client]
+    #     user=root
+    #     password=Welcome123..
+    #     "@
+    #     $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+    #     [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
+    #   when: "'Windows' in ansible_distribution"
+
+   
+    # - name: Backup MySQL databases with mysqldump using defaults file
+    #   ansible.builtin.win_shell: |
+    #     .\mysqldump --defaults-file="{{ userdir }}.my.cnf" --all-databases > {{ userdir }}alldatabases_backup.sql
+    #   args:
+    #     chdir: "{{ binloc }}/bin" 
+    #   when: "'Windows' in ansible_distribution"
+
+    - name: Find MySQL services using sc query
+      ansible.builtin.win_shell: |
+        Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
+      register: mysql_services
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Extract the actual name from the string
+      set_fact:
+        service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the extracted service name
+      debug:
+        msg: "The service name is: {{ service_name }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Download patch file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysqlpatchid }},None,None,'{{ patchname }}', None, r'{{ userdir }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfile.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Remove the temporary download file using Python script
+      win_file:
+        path: C:\downloadfile.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    # - name: Download MySQL Patch
+    #   win_get_url:
+    #     url: '{{ mysqlpatch }}'
+    #     dest: "{{ userdir }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    - name: Install MySQL using MSI
+      win_package:
+        path: "{{ userdir }}\\{{ patchname }}"  # Replace with the actual path to the MSI file
+        product_id: "{{ productid }}"
+        state: present
+        arguments: /quiet INSTALLDIR="{{ binloc }}" DATADIR="{{ dataloc }}"  # Adjust the install directory as needed
+      register: rslt
+      when: "'Windows' in ansible_distribution"
+
+    - name: resultins
+      debug:
+        msg: "{{ rslt }}"
+      when: "'Windows' in ansible_distribution"
+
+    
+    # - name: Restart MySQL service on Windows
+    #   win_service:
+    #     name: "{{ service_name }}"  # Change this if your MySQL service name is different
+    #     state: restarted
+    #   when: "'Windows' in ansible_distribution"
+    
+    # - name: Run mysqlcheck to verify database tables
+    #   win_command: >
+    #     .\mysqlcheck --defaults-file="{{ userdir }}.my.cnf" --all-databases
+    #   register: mysqlcheck_result
+    #   args:
+    #     chdir: "{{ binloc }}/bin" 
+    #   ignore_errors: yes  # Allow the playbook to continue even if an error occurs
+
+    # - name: Output mysqlcheck results
+    #   debug:
+    #     msg: "{{ mysqlcheck_result }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Check for tables that are not OK
+    #   set_fact:
+    #     tables_not_ok: "{{ mysqlcheck_result.stdout_lines | select('search', '^(?!.*OK$).*') | list }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Fail if there are tables that are not OK
+    #   fail:
+    #     msg: "The following tables are not OK: {{ tables_not_ok }}"
+    #   when: 
+    #     - tables_not_ok | length > 0
+    #     - "'Windows' in ansible_distribution"
+
+    # - name: Debug to show which tables are OK and not OK (for troubleshooting)
+    #   debug:
+    #     msg: "Checked MySQL tables: {{ mysqlcheck_result.stdout_lines }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    - name: Clean up installer
+      ansible.windows.win_file:
+        path: "{{ userdir }}\\{{ patchname }}"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    # - name: removebak if success
+    #   ansible.windows.win_file:
+    #       path: "{{ userdir }}\\alldatabases_backup.sql"
+    #       state: absent
+    #   when: 
+    #     - tables_not_ok | length == 0
+    #     - "'Windows' in ansible_distribution"
+
+    # - name: remove cnf if success
+    #   ansible.windows.win_file:
+    #       path: "{{ userdir }}.my.cnf"
+    #       state: absent
+    #   when: tables_not_ok | length == 0 
+    
+    
+     

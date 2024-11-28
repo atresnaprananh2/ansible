@@ -1,0 +1,7 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<script type="text/javascript" language="javascript">var loc=window.location.href;document.cookie="WASReqURLOidcn1333632137="+loc+"; path=/;"</script><script type="text/javascript" language="javascript">window.location.replace("https://login.ibm.com/oidc/endpoint/default/authorize?scope=openid&response_type=code&client_id=ZmRmZWVhZWItYzUwYS00&redirect_uri=https%3A%2F%2Fearly-access.ibm.com%2Foidcclient%2Fredirect%2Fepwt_www_prod_early_access&state=001732179343077rROlkD8w8")</script>
+<title>Redirect To OP</title> 
+</head>
+<body></body>
+</html>

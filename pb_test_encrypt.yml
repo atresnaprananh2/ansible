@@ -1,0 +1,26 @@
+- name: Encrypt and Decrypt with OpenSSL
+  hosts: mysqlrhel8
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
+  vars:   
+    needupdates: n
+    psqlmode: 'HA-Standby' 
+
+  tasks:
+    - name: Encrypt data using OpenSSL
+      shell: echo -n "admin" | openssl enc -aes-256-cbc -base64 -pass pass:YOUR_SECRET_KEY
+      register: encrypted_data
+
+    - name: Debug the encrypted string
+      debug:
+        msg: "Encrypted data: {{ encrypted_data.stdout }}"
+
+    - name: Decode base64 and decrypt using OpenSSL
+      shell: echo "{{ encrypted_data.stdout }}" | base64 -d | openssl enc -d -aes-256-cbc -pass pass:YOUR_SECRET_KEY
+      register: decrypted_data
+      failed_when: decrypted_data.rc != 0
+
+    - name: Show decrypted data
+      debug:
+        msg: "Decrypted data: {{ decrypted_data.stdout }}"

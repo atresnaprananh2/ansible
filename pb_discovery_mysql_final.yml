@@ -1,13 +1,16 @@
 - hosts: all
   gather_facts: yes
   name: System Discovery
+  # remote_user: root #remove when running on SA Client
+  # become: true #remove when running on SA Client
+  # become_user: root #remove when running on SA Client
   vars:   
     needupdates: n
     psqlmode: 'HA-Standby'
-    routerinfo: 'N\A'
-    shellinfo: 'N\A'
-    routerinfowin: 'N\A'
-    shellinfowin: 'N\A'
+    routerinfo: 'NA'
+    shellinfo: 'NA'
+    routerinfowin: 'NA'
+    shellinfowin: 'NA'
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -187,11 +190,16 @@
       debug:
         var: mysql_port.stdout_lines
       when: "'RedHat' in ansible_distribution"
+    
+    - name: Clean spaces
+      set_fact:
+        mysqlportcln: "{{ mysql_port.stdout_lines | replace(' ', '') }}"
+      when: "'RedHat' in ansible_distribution"
 
 
     - name: Set default MySQL port if not found
       set_fact:
-        mysql_port_value: "{{ mysql_port.stdout | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
+        mysql_port_value: "{{ mysqlportcln | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
       when: "'RedHat' in ansible_distribution"
 
     - name: Display MySQL port
@@ -220,14 +228,18 @@
     #   when: "'RedHat' in ansible_distribution"
         
     # change to check physical data directory
+    - name: clean from spaces
+      set_fact:
+        datadirlnxcln: "{{ mysqldatadir.stdout | replace(' ', '')  }}"
+      when: "'RedHat' in ansible_distribution"  
     - name: Set Fact discovery vars (linux)
       set_fact:
-        datadirlnx: "{{ mysqldatadir.stdout | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+        datadirlnx: "{{ datadirlnxcln | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
       when: "'RedHat' in ansible_distribution"  
 
     - name: Display MySQL datadirlinx
       debug:
-        var: datadirlnx[0]
+        var: mysqldatadir
       when: "'RedHat' in ansible_distribution" 
 
     - name: get physical data dir content
@@ -279,7 +291,7 @@
 
       #check physical mysql installation directory
     - name: get rootsize
-      shell: du -sm {{ datadirlnx }}/*/ | awk '{sum += $1} END {print sum " MB"}'
+      shell: du -sm {{ datadirlnx[0] }}/*/ | awk '{sum += $1} END {print sum " MB"}'
       register: mysql_database_size
       when: "'RedHat' in ansible_distribution"
 
@@ -332,9 +344,49 @@
     #     msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
     #   when: "'RedHat' in ansible_distribution"
 
+
+    - name: test1
+      debug:
+        var: SAUser
+      when: "'RedHat' in ansible_distribution"
+    - name: test2
+      debug:
+        var: SAPass
+      when: "'RedHat' in ansible_distribution"
+    - name: test3
+      debug:
+        var: routerinfo
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var: shellinfo
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var: mysql_port_value[0]
+      when: "'RedHat' in ansible_distribution"
     
-   
-      
+    - name: test4
+      debug:
+        var: dbconcat
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: test4
+      debug:
+        var: mysql_database_size.stdout 
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var: mysql_version[0]
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var:  datadirlnx[0]
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var:  basedirlnx
+      when: "'RedHat' in ansible_distribution"
 
     - name: Push custom attributes to selected server
       shell: |
@@ -757,15 +809,23 @@
       when: 
         - "'Windows' in ansible_distribution"
         - (major_ver_win | int) > 5
- 
 
-    - name: set shell and router directory 
+    - name: set router directory 
       set_fact:
         routerdirclean: "{{ routerdir.stdout_lines[0] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
+
+    - name: set shell directory 
+      set_fact:
         shelldirclean: "{{ shelldir.stdout_lines[0] }}"
       when: 
         - "'Windows' in ansible_distribution"
         - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
+
 
     - name: get router info (windows)
       win_command: >
@@ -776,6 +836,7 @@
       when: 
         - "'Windows' in ansible_distribution"
         - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
 
     - name: get shell info (windows)
       win_command: >
@@ -786,32 +847,39 @@
       when: 
         - "'Windows' in ansible_distribution"
         - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
 
-    - name: set shell and router version 1 
+    - name: set shell version 1 
       set_fact:
-        routerdata: "{{ routerverwin.stdout | regex_replace('\\s*\\(.*$', '') |  regex_replace('\\r\\n', '') }}"
         shelldata: "{{ shellverwin.stdout | regex_replace('\\s*\\(.*$', '') | regex_replace('\\r\\n', '') }}"
       when: 
         - "'Windows' in ansible_distribution"
         - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
 
-    - name: set shell and router version 2
+    - name: set  router version 1 
       set_fact:
-        routerinfowin: "{{ routerdata |  regex_replace('\\n', '')}}"
+        routerdata: "{{ routerverwin.stdout | regex_replace('\\s*\\(.*$', '') |  regex_replace('\\r\\n', '') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
+
+    - name: set shell version 2
+      set_fact:
         shellinfowin: "{{ shelldata |  regex_replace('\\n', '')}}"
       when: 
         - "'Windows' in ansible_distribution"
         - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
 
-    - name: rtr
-      debug:
-        var: routerinfowin
-      when: "'Windows' in ansible_distribution"
-    - name: sh
-      debug:
-        var: shellinfowin
-      when: "'Windows' in ansible_distribution"
-
+    - name: set router version 2
+      set_fact:
+        routerinfowin: "{{ routerdata |  regex_replace('\\n', '')}}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
 
     
     - name: Create a temporary Python script file (Windows)

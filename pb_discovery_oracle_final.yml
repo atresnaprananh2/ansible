@@ -61,7 +61,7 @@
         isclustered: 'yes'
       when: 
         - "'RedHat' in ansible_distribution"
-        - "'+ASM' in pmon_output.stdout"
+        - "'ASM' in pmon_output.stdout"
 
     - name:  Preparation - setcustattr
       set_fact:

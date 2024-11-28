@@ -1,0 +1,11 @@
+--2024-11-21 16:56:11--  https://early-access.ibm.com/software/support/trial/cst/programwebsite.wss?siteId=1120
+Resolving early-access.ibm.com (early-access.ibm.com)... 172.65.238.34, 2606:4700:90:0:ad53:2d25:62a9:163a
+Connecting to early-access.ibm.com (early-access.ibm.com)|172.65.238.34|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 600 [text/html]
+Saving to: ‘programwebsite.wss?siteId=1120’
+
+programwebsite.wss?siteId=1120                   0%[                                                                                                  ]       0  --.-KB/s               programwebsite.wss?siteId=1120                 100%[=================================================================================================>]     600  --.-KB/s    in 0s      
+
+2024-11-21 16:56:12 (14.8 MB/s) - ‘programwebsite.wss?siteId=1120’ saved [600/600]
+

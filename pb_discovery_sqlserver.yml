@@ -185,6 +185,8 @@
         sqlreleasever: >-
           {% if mainver == "15" %}
           MSSQL 2019
+          {% elif mainver == "16" %}
+          MSSQL 2022
           {% elif mainver == "14" %}
           MSSQL 2017
           {% elif mainver == "13" %}
