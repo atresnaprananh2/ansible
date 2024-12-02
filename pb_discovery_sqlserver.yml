@@ -8,54 +8,6 @@
     # sql_password: "Automation@123"  # Replace with a valid password
     # testpath: "C:\\Program Files\\Microsoft SQL Server\\MSSQL15.MSSQLSERVER\\MSSQL\\Log\\"
   tasks:
-    - name: Create a temporary Python script file get custom attr
-      win_shell: |
-        $script = @"
-        import pytwist
-        from pytwist import * 
-        from pytwist.com.opsware.search import Filter
-        from pytwist import twistserver
-        from pytwist.com.opsware.server import ServerRef
-        import json
-        ts = pytwist.twistserver.TwistServer()
-        try:
-            server_service = ts.server.ServerService
-            filter = Filter()
-            server_refs = server_service.findServerRefs(filter)
-            for server_ref in server_refs:
-                server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.interfaces[0]["ipv4"]["address"] }}" :
-                    try:
-                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
-                    except Exception as e:
-                        print(f"Error processing server {server_ref.getId()}: {e}")
-          
-        except Exception as e:
-            print(f"Failed to authenticate: {str(e)}")
-            exit(1)  
-        "@
-        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
-      when: "'Windows' in ansible_distribution"
-
-    - name: Execute the Python script
-      win_shell: |
-        cd "C:\Program Files\Opsware\agent\python3"
-        .\python C:\getcustomattr.py
-      register: instattrwin
-      when: "'Windows' in ansible_distribution"
-
-
-    - name: Remove the temporary Python script
-      win_file:
-        path: C:\getcustomattr.py
-        state: absent
-      when: "'Windows' in ansible_distribution"
-
-
-    - name:  Preparation - setcustattr
-      set_fact:
-        custattrwin: "{{ instattrwin.stdout }}"
-      when: "'Windows' in ansible_distribution"
 
     - name: Get Cluster Node
       win_shell: |
@@ -70,13 +22,6 @@
       when: 
         - "'Windows' in ansible_distribution"
         - chkcluster.failed == false
-
-    - name:  Preparation - set variables
-      set_fact:
-        SAUserwin: "{{ custattrwin.SAUser }}"
-        SAPasswin: "{{ custattrwin.SAPass }}"
-
-      when: "'Windows' in ansible_distribution"
 
     - name: get instance name microsoft sql server 
       win_reg_stat:
@@ -301,7 +246,6 @@
         import json
         ts = pytwist.twistserver.TwistServer()
         try:
-            ts.authenticate("{{ SAUserwin }}", "{{ SAPasswin }}")
             server_service = ts.server.ServerService
             filter = Filter()
             server_refs = server_service.findServerRefs(filter)

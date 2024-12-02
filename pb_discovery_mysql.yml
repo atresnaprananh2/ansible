@@ -1,9 +1,9 @@
-- hosts: winmysql
+- hosts: mysqlrhel8
   gather_facts: yes
   name: System Discovery
-  # remote_user: root #remove when running on SA Client
-  # become: true #remove when running on SA Client
-  # become_user: root #remove when running on SA Client
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
   vars:   
     needupdates: n
     psqlmode: 'HA-Standby'
@@ -30,49 +30,6 @@
     # - name: Gather installed package facts (linux)
     #   ansible.builtin.package_facts:
     #   when: "'Windows' not in ansible_distribution"
-
-    - name: Preparation - Get Software Policy Attr
-      shell: |
-        ./python3 - << 'EOF'
-        import pytwist
-        from pytwist import * 
-        from pytwist.com.opsware.search import Filter
-        from pytwist import twistserver
-        from pytwist.com.opsware.server import ServerRef
-        import json
-        ts = pytwist.twistserver.TwistServer()
-        try:
-            server_service = ts.server.ServerService
-            filter = Filter()
-            server_refs = server_service.findServerRefs(filter)
-            for server_ref in server_refs:
-                server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
-                    try:
-                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
-                    except Exception as e:
-                        print(f"Error processing server {server_ref.getId()}: {e}")
-          
-        except Exception as e:
-            print(f"Failed to authenticate: {str(e)}")
-            exit(1)  
-        EOF
-      register: instattr
-      args:
-        chdir: '/opt/opsware/agent/bin'
-      when: "'RedHat' in ansible_distribution"
-    
-    - name:  Preparation - setcustattr
-      set_fact:
-        custattr: "{{ instattr.stdout }}"
-      when: "'RedHat' in ansible_distribution"
-
-    - name:  Preparation - set variables
-      set_fact:
-        SAUser: "{{ custattr.SAUser }}"
-        SAPass: "{{ custattr.SAPass }}"
-
-      when: "'RedHat' in ansible_distribution"
 
     - name: Check MySQL installation
       shell: ". /etc/profile && which mysql"
@@ -345,14 +302,6 @@
     #   when: "'RedHat' in ansible_distribution"
 
 
-    - name: test1
-      debug:
-        var: SAUser
-      when: "'RedHat' in ansible_distribution"
-    - name: test2
-      debug:
-        var: SAPass
-      when: "'RedHat' in ansible_distribution"
     - name: test3
       debug:
         var: routerinfo
@@ -399,7 +348,6 @@
         import json
         ts = pytwist.twistserver.TwistServer()
         try:
-            ts.authenticate("{{ SAUser }}", "{{ SAPass }}")
             server_service = ts.server.ServerService
             filter = Filter()
             server_refs = server_service.findServerRefs(filter)
@@ -429,63 +377,6 @@
       when: "'RedHat' in ansible_distribution"
 
       #Windows Host Script
-
-
-    - name: Create a temporary Python script file get custom attr
-      win_shell: |
-        $script = @"
-        import pytwist
-        from pytwist import * 
-        from pytwist.com.opsware.search import Filter
-        from pytwist import twistserver
-        from pytwist.com.opsware.server import ServerRef
-        import json
-        ts = pytwist.twistserver.TwistServer()
-        try:
-            server_service = ts.server.ServerService
-            filter = Filter()
-            server_refs = server_service.findServerRefs(filter)
-            for server_ref in server_refs:
-                server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.interfaces[0]["ipv4"]["address"] }}" :
-                    try:
-                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
-                    except Exception as e:
-                        print(f"Error processing server {server_ref.getId()}: {e}")
-          
-        except Exception as e:
-            print(f"Failed to authenticate: {str(e)}")
-            exit(1)  
-        "@
-        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
-      when: "'Windows' in ansible_distribution"
-
-    - name: Execute the Python script
-      win_shell: |
-        cd "C:\Program Files\Opsware\agent\python3"
-        .\python C:\getcustomattr.py
-      register: instattrwin
-      when: "'Windows' in ansible_distribution"
-
-
-    - name: Remove the temporary Python script
-      win_file:
-        path: C:\getcustomattr.py
-        state: absent
-      when: "'Windows' in ansible_distribution"
-
-
-    - name:  Preparation - setcustattr
-      set_fact:
-        custattrwin: "{{ instattrwin.stdout }}"
-      when: "'Windows' in ansible_distribution"
-
-    - name:  Preparation - set variables
-      set_fact:
-        SAUserwin: "{{ custattrwin.SAUser }}"
-        SAPasswin: "{{ custattrwin.SAPass }}"
-
-      when: "'Windows' in ansible_distribution"
 
     - name: Validate if WOW6432Node registry key exists (Windows)
       win_reg_stat:
@@ -893,7 +784,6 @@
         import json
         ts = pytwist.twistserver.TwistServer()
         try:
-            ts.authenticate("{{ SAUserwin }}", "{{ SAPasswin }}")
             server_service = ts.server.ServerService
             filter = Filter()
             server_refs = server_service.findServerRefs(filter)

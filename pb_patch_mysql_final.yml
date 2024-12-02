@@ -360,6 +360,7 @@
         - "'Windows' in ansible_distribution"
         - "not registry_check.exists" 
         - isanyrouter.failed == false 
+
     - name: set path x64 3
       set_fact:
         mysql_installation_2: "{{ mysql_installation_264 }}"
@@ -386,8 +387,158 @@
         mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
       when: "'Windows' in ansible_distribution"
 
+    - name: get major version (Windows)
+      set_fact:
+        major_ver_win: "{{ mysqlversion[:1] }}"
+      when: "'Windows' in ansible_distribution"
     
-   
+    - name: Check if VC++ 2013 x64 Redistributable is installed
+      win_shell: |
+        $key = "HKLM:\SOFTWARE\Microsoft\VisualStudio\12.0\VC\Runtimes\x64"
+        if (Test-Path $key) {
+          (Get-ItemProperty -Path $key).Installed
+        } else {
+          Write-Output "0"
+        }
+      register: vc_redist_2013
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+
+    
+
+    - name: Check if VC++ 2019 x64 Redistributable is installed
+      win_shell: |
+        $key = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+        if (Test-Path $key) {
+          (Get-ItemProperty -Path $key).Installed
+        } else {
+          Write-Output "0"
+        }
+      register: vc_redist_2019
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        
+    - name: Set fact VC 2019 (windows)
+      set_fact:        
+        vcredist2019cln: "{{ vc_redist_2019.stdout | regex_replace('[\\r\\n]+', ' ')   }}"
+        vcredist2019id: 7070001
+        vcredist2019name: "VC_redist_2019.x64.exe"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        
+    - name: Set fact VC 2013 (windows)
+      set_fact:        
+        vcredist2013cln: "{{ vc_redist_2013.stdout | regex_replace('[\\r\\n]+', ' ')   }}"
+        vcredist2013id: 7060001
+        vcredist2013name: "vcredist_x64_2013.exe"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+    
+    - name: Download vcredist 2019
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ vcredist2019id }},None,None,'{{ vcredist2019name }}', None, r'{{ userdir }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfilevc2019.py -Encoding UTF8
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - vcredist2019cln == '0'
+
+    - name: Execute the download file using Python script for VC 2019
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfilevc2019.py
+      register: instattrwin
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - vcredist2019cln == '0'
+
+    - name: Remove the temporary download file using Python script for VC 2019
+      win_file:
+        path: C:\downloadfilevc2019.py
+        state: absent
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - vcredist2019cln == '0'
+    
+    - name: Install VC++ 2019 x64 Redistributable
+      win_package:
+        path: "{{ userdir }}\\{{ vcredist2019name }}"
+        arguments: /quiet /norestart
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - vcredist2019cln == '0'
+
+    - name: Remove the installer to clean up
+      win_file:
+        path: "{{ userdir }}\\{{ vcredist2019name }}"
+        state: absent
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - vcredist2019cln == '0'
+
+    - name: Download vcredist 2013
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ vcredist2013id }},None,None,'{{ vcredist2013name }}', None, r'{{ userdir }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfilevc2013.py -Encoding UTF8
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+        - vcredist2013cln == '0'
+
+    - name: Execute the download file using Python script for VC 2013
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfilevc2013.py
+      register: instattrwin
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+        - vcredist2013cln == '0'
+
+    - name: Remove the temporary download file using Python script for VC 2013
+      win_file:
+        path: C:\downloadfilevc2019.py
+        state: absent
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+        - vcredist2013cln == '0'
+        
+    - name: Install VC++ 2013 x64 Redistributable
+      win_package:
+        path: "{{ userdir }}\\{{ vcredist2013name }}"
+        arguments: /quiet /norestart
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+        - vcredist2013cln == '0'
+
+    - name: Remove the installer to clean up
+      win_file:
+        path: "{{ userdir }}\\{{ vcredist2013name }}"
+        state: absent
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) == 5
+        - vcredist2013cln == '0'
+    
+    
 
     # - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
     #   ansible.builtin.win_shell: |
@@ -408,21 +559,21 @@
     #     chdir: "{{ binloc }}/bin" 
     #   when: "'Windows' in ansible_distribution"
 
-    - name: Find MySQL services using sc query
-      ansible.builtin.win_shell: |
-        Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
-      register: mysql_services
-      when: "'Windows' in ansible_distribution"
+    # - name: Find MySQL services using sc query
+    #   ansible.builtin.win_shell: |
+    #     Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
+    #   register: mysql_services
+    #   when: "'Windows' in ansible_distribution"
     
-    - name: Extract the actual name from the string
-      set_fact:
-        service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
-      when: "'Windows' in ansible_distribution"
+    # - name: Extract the actual name from the string
+    #   set_fact:
+    #     service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
+    #   when: "'Windows' in ansible_distribution"
 
-    - name: Display the extracted service name
-      debug:
-        msg: "The service name is: {{ service_name }}"
-      when: "'Windows' in ansible_distribution"
+    # - name: Display the extracted service name
+    #   debug:
+    #     msg: "The service name is: {{ service_name }}"
+    #   when: "'Windows' in ansible_distribution"
 
     - name: Download patch file
       win_shell: |
