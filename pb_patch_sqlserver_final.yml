@@ -1,0 +1,153 @@
+- name: Patch Microsoft SQL Server 2019
+  hosts: all  # Replace with your actual Windows host group
+  gather_facts: yes
+  vars:
+    - dest: C:\Temp
+
+  tasks:
+   
+    - name: Check if directory exists, if not create it
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: directory
+
+    - name: Create a temporary Python script file get custom attr
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.interfaces[0]["ipv4"]["address"] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        "@
+        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getcustomattr.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\getcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattrwin: "{{ instattrwin.stdout }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name:  Preparation - set variables
+      set_fact:
+        patchname: "{{ custattrwin.SQLServer_patchname }}"
+        patchid: "{{ custattrwin.SQLServer_patchid }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Download patch file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, r'{{ dest }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfile.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Remove the temporary download file using Python script
+      win_file:
+        path: C:\downloadfile.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name: Run the SQL Server patch installer silently
+      win_shell: >
+        {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
+      args:
+        executable: cmd
+      ignore_errors: yes
+      register: install_status
+
+    - name: Check if reboot is required
+      debug:
+        msg: >
+          Installation completed with return code {{ install_status.rc }}.
+          A reboot is {{ 'required' if install_status.rc == 3010 else 'not required' }}.
+
+    - name: Reboot if required
+      win_reboot:
+      when: install_status.rc == 3010
+
+    - name: Confirm reboot status
+      win_shell: "echo System reboot completed."
+      register: post_reboot_status
+      when: install_status.rc == 3010
+
+    - name: Delete directory and its contents
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: absent
+
+    # - name: Run SQL Server 2019 patch
+    #   win_command: |
+    #     C:\temp\sqlserver2019-kb5046365-x64.exe /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
+    #   args:
+    #     creates: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log
+    #   ignore_errors: yes
+    #   register: checkinstallation
+
+    # - name: Check SQL Server patch installation log
+    #   win_stat:
+    #     path: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log
+    #   register: patch_log
+
+    # - name: Check if reboot is required
+    #   debug:
+    #     msg: >
+    #       Installation completed with return code {{ checkinstallation.rc }}.
+    #       A reboot is {{ 'required' if checkinstallation.rc == 3010 else 'not required' }}.
+
+    # - name: Reboot if required
+    #   win_reboot:
+    #   when: checkinstallation.rc == 3010
+
+    # - name: Confirm reboot status
+    #   win_shell: "echo System reboot completed."
+    #   register: post_reboot_status
+    #   when: install_status.rc == 3010
+
+    # - name: Verify patch installation was successful
+    #   win_shell: |
+    #     Get-Content -Path "C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log" | Select-String -Pattern "successful"
+    #   # when: patch_log.stat.exists
+    #   register: patch_status
+    #   failed_when: patch_status.stdout | search("successful") == False

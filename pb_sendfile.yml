@@ -13,9 +13,19 @@
     #   get_url:
     #     url: '{{ fileurl }}'
     #     dest: "{{ dest }}"
-    - name: Download PostgreSQL 16 installer (windows)
-      win_get_url:
-        url: "{{ fileurl }}"
-        dest: C:\{{ installername }}
-      # when: "'Windows' in ansible_distribution"
+    # - name: Download PostgreSQL 16 installer (windows)
+    #   win_get_url:
+    #     url: "{{ fileurl }}"
+    #     dest: C:\{{ installername }}
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysql_patchid }},None,None,'{{ mysql_tarball }}', None, '/tmp'))
+      register: test
+      when: "'RedHat' in ansible_distribution"   
+      tags: download,remote
      

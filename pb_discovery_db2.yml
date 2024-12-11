@@ -1,0 +1,150 @@
+- hosts: db2svr
+  gather_facts: yes
+  name: System Discovery
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
+  vars:   
+    needupdates: n
+    psqlmode: 'HA-Standby'
+    routerinfo: 'NA'
+    shellinfo: 'NA'
+    routerinfowin: 'NA'
+    shellinfowin: 'NA'
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+
+    - name: Display OS distribution and version (linux)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts['default_ipv4']['address'] }}"
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Display OS distribution and version (windows)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts.ip_addresses[1] }}"
+      when: "'Windows' in ansible_distribution"
+
+    #linux script
+  
+    - name: Check db2 user
+      shell: "ps -ef | grep db2sysc | grep -v grep | awk '{print $1}'"
+      register: db2user
+      ignore_errors: yes
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: db2user.stdout
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Get Db2 version using db2level
+      shell: "sudo -i -u db2inst1 db2level"
+      register: db2_output
+      ignore_errors: true
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Extract Db2 version using awk
+      shell: "echo '{{ db2_output.stdout }}' | awk -F'\"' '/Informational tokens/ {print $2}'"
+      register: db2_version
+      when: 
+        - db2_output.stdout is defined
+        - "'RedHat' in ansible_distribution"
+
+    - name: Display Db2 version
+      debug:
+        msg: "Db2 version: {{ db2_version.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    
+    - name: Extract Db2 special build using awk
+      shell: "echo '{{ db2_output.stdout }}' | awk -F'\"' '/Informational tokens/ {print $4}'"
+      register: db2_special_build
+      when: 
+        - db2_output.stdout is defined
+        - "'RedHat' in ansible_distribution"
+
+    - name: Display Db2 special build
+      debug:
+        msg: "Db2 special build: {{ db2_special_build.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Get Db2 user home directory
+      ansible.builtin.shell: |
+        getent passwd db2inst1 | cut -d: -f6
+      register: db2_home
+      when: "'RedHat' in ansible_distribution"
+  
+    - name: Show Db2 home path
+      ansible.builtin.debug:
+        msg: "Db2 home directory: {{ db2_home.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Get db 2 installation path 
+      shell: "find /opt -name db2 -type f 2>/dev/null"
+      register: db2installationpath
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Show Db2 installation path
+      ansible.builtin.debug:
+        msg: "Db2 installation directory: {{ db2installationpath.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Get Db2 root free space
+      ansible.builtin.shell: |
+        df -h "$(dirname $(dirname {{ db2installationpath.stdout }}))"
+      register: db2_free_space
+      when: "'RedHat' in ansible_distribution"
+
+    - name: set variables
+      set_fact:
+        db2availspace: "{{ db2_free_space.stdout.splitlines()[1].split()[3] }}"
+        db2user: "{{ db2user.stdout }}"
+        db2ver: "{{ db2_version.stdout }}"
+        db2fixpack: "{{ db2_special_build.stdout }}" 
+        db2home: "{{ db2_home.stdout }}"
+        db2path: "{{ db2installationpath.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'DB2_Rootspace':'{{ db2availspace }}', 'DB2_User':'{{ db2user }}', 'DB2_Version':'{{ db2ver }}', 'DB2_Specialbuilds':'{{ db2fixpack }}', 'DB2_Home':'{{ db2home }}', 'DB2_InstallationPath':'{{ db2path }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output.stdout }}" 
+      when: "'RedHat' in ansible_distribution"
+
+    
+
+      

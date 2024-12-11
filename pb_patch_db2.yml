@@ -1,5 +1,5 @@
 - name: Patch MySQL RHEL
-  hosts: winmysql 
+  hosts: all 
   gather_facts: yes
   name: System Discovery
   vars:   
@@ -559,21 +559,21 @@
     #     chdir: "{{ binloc }}/bin" 
     #   when: "'Windows' in ansible_distribution"
 
-    - name: Find MySQL services using sc query
-      ansible.builtin.win_shell: |
-        Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
-      register: mysql_services
-      when: "'Windows' in ansible_distribution"
+    # - name: Find MySQL services using sc query
+    #   ansible.builtin.win_shell: |
+    #     Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
+    #   register: mysql_services
+    #   when: "'Windows' in ansible_distribution"
     
-    - name: Extract the actual name from the string
-      set_fact:
-        service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
-      when: "'Windows' in ansible_distribution"
+    # - name: Extract the actual name from the string
+    #   set_fact:
+    #     service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
+    #   when: "'Windows' in ansible_distribution"
 
-    - name: Display the extracted service name
-      debug:
-        msg: "The service name is: {{ service_name }}"
-      when: "'Windows' in ansible_distribution"
+    # - name: Display the extracted service name
+    #   debug:
+    #     msg: "The service name is: {{ service_name }}"
+    #   when: "'Windows' in ansible_distribution"
 
     - name: Download patch file
       win_shell: |
@@ -620,11 +620,11 @@
       when: "'Windows' in ansible_distribution"
 
     
-    - name: Restart MySQL service on Windows
-      win_service:
-        name: "{{ service_name }}"  # Change this if your MySQL service name is different
-        state: restarted
-      when: "'Windows' in ansible_distribution"
+    # - name: Restart MySQL service on Windows
+    #   win_service:
+    #     name: "{{ service_name }}"  # Change this if your MySQL service name is different
+    #     state: restarted
+    #   when: "'Windows' in ansible_distribution"
     
     # - name: Run mysqlcheck to verify database tables
     #   win_command: >

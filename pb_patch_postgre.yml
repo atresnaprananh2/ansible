@@ -21,16 +21,54 @@
         msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }}"
     
     #linux script
-    # - name: Gather installed package facts (linux)
-    #   ansible.builtin.package_facts:
-    #   when: "'Windows' not in ansible_distribution"
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
     
-    # - name: Check if PostgreSQL is installed (linux)
-    #   debug:
-    #     msg: "{{ inventory_hostname }}: PostgreSQL is installed"
-    #   when: 
-    #     - "'Windows' not in ansible_distribution"
-    #     - "'postgresql' in ansible_facts.packages or 'postgresql-server' in ansible_facts.packages"
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 1
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        postgrepatchname: "{{ custattr.postgresql_patchname }}"
+        postgrepatchid: "{{ custattr.postgresql_patchid }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 2
+      set_fact:
+        postgrefolder: "{{ postgrepatchname | regex_replace('\\.tar\\.gz$', '') }}"
+      when: "'RedHat' in ansible_distribution"
+
     
     - name: Find the path of psql  (linux)
       command: which psql
@@ -113,26 +151,23 @@
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Check latest version (above ver 9 linux)
-      shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ major_ver }}\.[0-9]+' | sort -V | tail -1
-      register: latestver
-      args:
-        chdir: '/var/lib'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "major_ver | int >= 10"
-    - name: chk ver
-      debug:
-        msg:
-          - "{{ latestver.stdout }}"
-      when: "'RedHat' in ansible_distribution"
 
-    - name: download patch data
-      command: wget https://ftp.postgresql.org/pub/source/v{{ latestver.stdout[1:] }}/postgresql-{{ latestver.stdout[1:] }}.tar.gz
-      when: "'RedHat' in ansible_distribution"
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ postgrepatchid }},None,None,'{{ postgrepatchname }}', None, '/tmp'))
+      register: test
+      when: "'RedHat' in ansible_distribution"   
+      tags: download,remote
+
+
     
     - name: Extract patch data
-      command: tar -xzf postgresql-{{ latestver.stdout[1:] }}.tar.gz
+      command: tar -xzf /tmp/{{ postgrepatchname }} -C /tmp/
       when: "'RedHat' in ansible_distribution"
     
     - name: repository check
@@ -205,13 +240,13 @@
       shell: ./configure --prefix={{ basedirpg }} --without-icu
       register: chk2
       args:
-        chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
+        chdir: '/tmp/{{ postgrefolder }}'
       when: "'RedHat' in ansible_distribution"
 
     - name: make file 
       command: make
       args:
-        chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
+        chdir: '/tmp/{{ postgrefolder }}'
       when: "'RedHat' in ansible_distribution"
      
 
@@ -219,7 +254,7 @@
       command: make install
       register: chkins
       args:
-        chdir: '/root/postgresql-{{ latestver.stdout[1:] }}'
+        chdir: '/tmp/{{ postgrefolder }}'
       when: "'RedHat' in ansible_distribution"
     
     - name: chk configure
