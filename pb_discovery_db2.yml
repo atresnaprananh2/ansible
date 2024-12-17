@@ -1,16 +1,8 @@
-- hosts: db2svr
+- hosts: all
   gather_facts: yes
   name: System Discovery
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
   vars:   
-    needupdates: n
-    psqlmode: 'HA-Standby'
-    routerinfo: 'NA'
-    shellinfo: 'NA'
-    routerinfowin: 'NA'
-    shellinfowin: 'NA'
+    db2fixpack: 'NA'
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -28,14 +20,14 @@
     #linux script
   
     - name: Check db2 user
-      shell: "ps -ef | grep db2sysc | grep -v grep | awk '{print $1}'"
+      shell: "cat /etc/group | grep db2 | awk -F: '{print $1}'"
       register: db2user
       ignore_errors: yes
       when: "'RedHat' in ansible_distribution"
     
     - name: chk1
       debug:
-        var: db2user.stdout
+        var: db2user
       when: "'RedHat' in ansible_distribution"
 
     - name: Get Db2 version using db2level
@@ -89,22 +81,45 @@
       ansible.builtin.debug:
         msg: "Db2 installation directory: {{ db2installationpath.stdout }}"
       when: "'RedHat' in ansible_distribution"
+    
+    - name: Show Db2 Home path
+      ansible.builtin.debug:
+        var: db2_home
+      when: "'RedHat' in ansible_distribution"
 
+    
+    
     - name: Get Db2 root free space
       ansible.builtin.shell: |
         df -h "$(dirname $(dirname {{ db2installationpath.stdout }}))"
       register: db2_free_space
       when: "'RedHat' in ansible_distribution"
+    
+    - name: Debug raw output
+      debug:
+        var: db2_free_space.stdout
+
+    - name: Show Db2 free root space
+      ansible.builtin.debug:
+        var:  db2_free_space.stdout.splitlines()[1]
+      when: "'RedHat' in ansible_distribution"
+      
 
     - name: set variables
       set_fact:
-        db2availspace: "{{ db2_free_space.stdout.splitlines()[1].split()[3] }}"
-        db2user: "{{ db2user.stdout }}"
+        db2availspace: "{{  db2_free_space.stdout.splitlines()[1].split()[3]  }}"
+        db2user: "{{ db2user.stdout_lines | join(';') }}"
         db2ver: "{{ db2_version.stdout }}"
-        db2fixpack: "{{ db2_special_build.stdout }}" 
         db2home: "{{ db2_home.stdout }}"
         db2path: "{{ db2installationpath.stdout }}"
       when: "'RedHat' in ansible_distribution"
+      
+    - name: set variables 2
+      set_fact:
+        db2fixpack: "{{ db2_special_build.stdout }}" 
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - db2_output.stdout is defined
 
     - name: Push custom attributes to selected server
       shell: |

@@ -80,6 +80,12 @@
       when: "'RedHat' in ansible_distribution"
 
     
+    - name: check autorun  (linux)
+      debug:
+        var: oraclehomeinfo.stdout.split(':')
+      when: "'RedHat' in ansible_distribution"
+
+    
     - name: Set fact oratab (linux)
       set_fact:
         oraclehome: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
@@ -87,6 +93,7 @@
         autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
         byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
         osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
+        patchloc: "/opt/opsware/Patching/"
       when: "'RedHat' in ansible_distribution"
 
     - name: Get Oracle Home directory size in GB
@@ -236,7 +243,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'RootSpace': '{{ rootsize }}','Oracle_HomeSpace': '{{ orahomesize }}', 'Oracle_Cluster': '{{ isclustered }}', 'Oracle_OSVersion': '{{ osver }}', 'Oracle_DBVersion':'{{ oracleversion }}', 'Oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'Oracle_Instance': '{{ instance }}','Oracle_Listener' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Oracle_Backup_Loc': 'test', 'patch_file_location': 'test','Oracle_OPatch_Version':'{{ opatchversion }}', 'Oracle_port': '{{ oraport[0] }}', 'Oracle_autorun': '{{ autorun }}', 'Oracle_PatchInfo': '{{ patch_description }}'}
+                        CAMap = {'RootSpace': '{{ rootsize }}','Oracle_HomeSpace': '{{ orahomesize }}', 'Oracle_Cluster': '{{ isclustered }}', 'Oracle_OSVersion': '{{ osver }}', 'Oracle_DBVersion':'{{ oracleversion }}', 'Oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'Oracle_Instance': '{{ instance }}','Oracle_Listener' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Oracle_Backup_Loc': 'NA', 'patch_file_location': '{{ patchloc }}','Oracle_OPatch_Version':'{{ opatchversion }}', 'Oracle_port': '{{ oraport[0] }}', 'Oracle_autorun': '{{ autorun }}', 'Oracle_PatchInfo': '{{ patch_description }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
