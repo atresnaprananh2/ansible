@@ -7,9 +7,6 @@
   vars:
     installername: postgresqlinstall.exe
     urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
-    fileurlrhel7: http://172.19.2.98/patches/rhel7.tar.gz
-    fileurlrhel8: http://172.19.2.98/patches/rhel8.tar.gz
-    fileurlrhel9: http://172.19.2.98/patches/rhel9.tar.gz
     dest: /var/lib
     service_pattern: postgresql
   tasks:
@@ -62,6 +59,12 @@
         ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
         postgrepatchname: "{{ custattr.postgresql_patchname }}"
         postgrepatchid: "{{ custattr.postgresql_patchid }}"
+        rhel7repoid: "7190001"
+        rhel7reponame: "rhel7.tar.gz"
+        rhel8repoid: "7210001"
+        rhel8reponame: "rhel8.tar.gz"
+        rhel9repoid: "7200001"
+        rhel9reponame: "rhel9.tar.gz"
       when: "'RedHat' in ansible_distribution"
 
     - name:  Preparation - set variables 2
@@ -180,32 +183,45 @@
       command: sudo mkdir /var/local_repo/
       when: "'RedHat' in ansible_distribution"
 
-    - name: get local repo rhel {{ ansible_distribution_major_version }}
-      get_url:
-        url: '{{ fileurlrhel7 }}'
-        dest: '{{ dest }}'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - chkrepo.failed == true
-        - ansible_distribution_major_version == "7"
+    - name: Prerequisite --- download repo rhel {{ ansible_distribution_major_version }}
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
 
-    - name: get local repo rhel {{ ansible_distribution_major_version }}
-      get_url:
-        url: '{{ fileurlrhel8 }}'
-        dest: '{{ dest }}'
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ rhel7repoid }},None,None,'{{ rhel7reponame }}', None, '{{ dest }}'))
+      register: test
       when: 
         - "'RedHat' in ansible_distribution"
         - chkrepo.failed == true
-        - ansible_distribution_major_version == "8"
+        - ansible_distribution_major_version == "7"  
 
-    - name: get local repo rhel {{ ansible_distribution_major_version }}
-      get_url:
-        url: '{{ fileurlrhel9 }}'
-        dest: '{{ dest }}'
+    - name: Prerequisite --- download repo rhel {{ ansible_distribution_major_version }}
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ rhel8repoid }},None,None,'{{ rhel8reponame }}', None, '{{ dest }}'))
+      register: test
       when: 
         - "'RedHat' in ansible_distribution"
         - chkrepo.failed == true
-        - ansible_distribution_major_version == "9"
+        - ansible_distribution_major_version == "8"  
+
+    - name: Prerequisite --- download repo rhel {{ ansible_distribution_major_version }}
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ rhel9repoid }},None,None,'{{ rhel9reponame }}', None, '{{ dest }}'))
+      register: test
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkrepo.failed == true
+        - ansible_distribution_major_version == "9"  
+
 
     - name: copy downloaded repofile
       command: sudo mv {{ dest }}/rhel{{ ansible_distribution_major_version }}.tar.gz /var/local_repo/

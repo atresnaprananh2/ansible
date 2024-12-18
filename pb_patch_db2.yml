@@ -1,10 +1,7 @@
 - name: Patch db2
-  hosts: db2svr 
+  hosts: all 
   gather_facts: yes
   name: System Discovery
-  remote_user: root
-  become: true
-  become_user: root
   vars:   
     #change the patch information if needed
     - mysql_installation_2: {}
@@ -56,14 +53,36 @@
         db2installationpath: "{{ custattr.DB2_InstallationPath }}"
         db2user: "{{ custattr.DB2_User }}"
         db2installfixpackpath: "{{ custattr.DB2_InstallationPath[:-8] }}"
+        db2version: "{{ custattr.DB2_Version }}"
 
       when: "'RedHat' in ansible_distribution"
+    
+    - name: Extract version component 2
+      ansible.builtin.set_fact:
+        version_component_2: "{{ db2version | regex_search('v(\\d+)\\.\\d+\\.\\d+\\.\\d+', '\\1') }}"
+
+    - name: Display the extracted version component 2
+      ansible.builtin.debug:
+        msg: "The version component 2 is: {{ version_component_2 }}"
     
     - name: check status
       debug:
         var: db2installfixpackpath
       when: "'RedHat' in ansible_distribution"   
     
+    - name:  Preparation - set patchdir other than db2 12
+      set_fact:
+        db2patchdir11: "server_t"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - version_component_2[0] != '12'
+
+    - name:  Preparation - set patchdir
+      set_fact:
+        db2patchdir12: "server_dec"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - version_component_2[0] == '12'
     
     - name:  Preparation - set variables 2
       set_fact:
@@ -93,31 +112,65 @@
       when: "'RedHat' in ansible_distribution"   
       tags: download,remote
 
-   
-
-    - name: Extract DB2
-      command: tar -xvf {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
+    
+    - name: Extract DB2 other than 12
+      command: tar -xvzf  {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
       when: 
         - "'RedHat' in ansible_distribution"   
- 
-    - name: install fixpack test      
-      shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
-      args:
-        chdir: '/tmp/server_dec'
-      register: logcheck
-      when: "'RedHat' in ansible_distribution"   
-  
+        - version_component_2[0] != '12'
 
-    # - name: install fixpack 
-    #   shell: >
-    #     ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
-    #     no
-    #     EOF
+
+    - name: Extract DB2 12
+      command: tar -xvf {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
+      when: 
+        - "'RedHat' in ansible_distribution"  
+        - version_component_2[0] == '12' 
+    
+ 
+    # - name: install fixpack test  db2 12  
+    #   shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
     #   args:
-    #     chdir: '/tmp/server_dec'
+    #     chdir: '/tmp/{{ db2patchdir12 }}'
     #   register: logcheck
-    #   ignore_errors: yes
-    #   when: "'RedHat' in ansible_distribution"   
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"   
+    #     - version_component_2[0] == '12'
+
+    # - name: install fixpack test  other than ver 12 
+    #   shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
+    #   args:
+    #     chdir: '/tmp/{{ db2patchdir11 }}'
+    #   register: logcheck
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"   
+    #     - version_component_2[0] != '12'
+
+    - name: install fixpack db2 ver 12
+      shell: >
+        ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
+        no
+        EOF
+      args:
+        chdir: '/tmp/{{ db2patchdir12 }}'
+      register: logcheck
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"   
+        - version_component_2[0] == '12'
+
+    - name: install fixpack db2 other ver
+      shell: >
+        ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
+        no
+        EOF
+      args:
+        chdir: '/tmp/{{ db2patchdir11 }}'
+      register: logcheck
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"   
+        - version_component_2[0] != '12'
+
 
     - name: check status installation 
       debug:
