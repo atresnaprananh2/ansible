@@ -26,6 +26,11 @@
       shell: ps -ef | grep ora_pmon | grep -v grep
       register: pmon_output
       when: "'RedHat' in ansible_distribution"
+    
+    - name: Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
+      when: "'RedHat' in ansible_distribution"
 
     - name:  Preparation - set variables
       set_fact:
@@ -44,7 +49,7 @@
       when: "'RedHat' in ansible_distribution"
 
     - name: Find the latest patch installed
-      command:  sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
       register: oraclelastpatch
       args:
         chdir: '/var/lib'
@@ -107,7 +112,7 @@
         msg: "Root filesystem space: {{ byteleft | float * (1/1000000000)  }} GB available"
 
     - name: "Get Oracle Version"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;sqlplus -v'
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
       register: oracleversion
       when: "'RedHat' in ansible_distribution"
     
@@ -118,14 +123,14 @@
       when: "'RedHat' in ansible_distribution"
 
     - name: "Get Port"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oraclehome }}/bin/lsnrctl status' 
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/bin/lsnrctl status' 
         # when: "oracle_binary_version | splitVersion == '12'"
       register: oracleport
       when: "'RedHat' in ansible_distribution"
 
 
     - name: "Get Opatch Version"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oraclehome }}/OPatch/opatch version'
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/OPatch/opatch version'
       register: opatchversion
       when: "'RedHat' in ansible_distribution"
 

@@ -63,6 +63,11 @@
       when: "'RedHat' in ansible_distribution"
 
     #discovery start
+    - name: Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
+      when: "'RedHat' in ansible_distribution"
+
     - name: Find the path oracle home  (linux)
       command: grep -E '^[^#]' /etc/oratab
       register: oraclehomeinfo
@@ -88,7 +93,7 @@
   
 
     - name: "Get Oracle Version"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;sqlplus -v'
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
       register: oracleversion
       when: "'RedHat' in ansible_distribution"
     
@@ -101,7 +106,7 @@
 
 
     - name: "Get Opatch Version"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oracle_home_path }}/OPatch/opatch version'
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/OPatch/opatch version'
       register: opatchversion
       when: "'RedHat' in ansible_distribution"
 
@@ -590,7 +595,7 @@
         - debug
         - patching 
     - name: "Step 27 --- Stop the named listeners from the {{ oracle_binary_version }} home"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl stop {{ listenername }}' 
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl stop {{ listenername }}' 
         # when: "oracle_binary_version | splitVersion == '12'"
       tags:
         - patching
@@ -605,7 +610,7 @@
     - block:
         - name: "Step 29 --- Installing Quarterly Security Patch ({{ oneoff_patch_dir_int }})"
           ansible.builtin.expect:
-            command: sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply' 
+            command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply' 
             chdir: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_patch_dir_int }}/{{patchcode}}'
             responses:
               (?i)Email: ''
@@ -647,7 +652,7 @@
 
     - name: "Step 30 --- Verify all patches have been applied successfully"
       ansible.builtin.expect:
-        command:  sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+        command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
         chdir: '{{ oracle_home_path }}/OPatch'
         responses:
           (?i)proceed: 'y'
@@ -655,7 +660,7 @@
       tags:
         - patching
     - name: "Step 31 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
-      command: sudo -u oracle bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl start {{ listenername }}' 
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl start {{ listenername }}' 
         #when: "oracle_binary_version | splitVersion == '12'"
       tags:
         - patching

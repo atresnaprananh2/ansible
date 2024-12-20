@@ -26,10 +26,6 @@
 
     #linux script
 
-    
-    
-    
-    
     - name: Find the path of psql  (linux)
       command: which psql
       register: psql_path
@@ -43,41 +39,87 @@
       args:
         chdir: '/var/lib'
       when: "'RedHat' in ansible_distribution"
+    
+   
 
     - name: Set fact base dir (linux)
       set_fact:
         basedirlnx: "{{ binpathpsql.stdout[:-4] }}"
-      
+        postmasterloc: "{{ binpathpsql.stdout[:-4] }}postmaster"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: check latest version  (linux)
+      debug:
+        var: postmasterloc
       when: "'RedHat' in ansible_distribution"
 
-  
-    - name: Find the path of postgre data  (linux)
-      command: sudo -u postgres psql -t -P format=unaligned -c "SHOW data_directory;"
-      register: pgdatadir
+
+    - name: get datadirectory postgre
+      shell: ps aux | grep "{{ postmasterloc }}" | grep -oP '(?<=-D )\S+'
+      register: chkdatadir
       args:
-        chdir: "{{ basedirlnx }}"
+        chdir: '/var/lib'
       when: "'RedHat' in ansible_distribution"
+
+    
+    - name: Clean Data Dir
+      set_fact:
+        pgdatadir: "{{ chkdatadir.stdout_lines[0] }}"
+      when: "'RedHat' in ansible_distribution"
+
+    # - name: Find the path of postgre data  (linux)
+    #   command: sudo -u postgres psql -t -P format=unaligned -c "SHOW data_directory;"
+    #   register: pgdatadir
+    #   args:
+    #     chdir: "{{ basedirlnx }}"
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: Find superuser 
+    #   command: sudo -u postgres psql -t -P format=unaligned -c "SELECT usename AS username FROM pg_user WHERE usesuper = true;"
+    #   register: superusername
+    #   args:
+    #     chdir: "{{ basedirlnx }}"
+    #   when: "'RedHat' in ansible_distribution"
 
     - name: Find superuser 
-      command: sudo -u postgres psql -t -P format=unaligned -c "SELECT usename AS username FROM pg_user WHERE usesuper = true;"
+      shell: ps -ef | grep postmaster | grep -v grep | awk '{print $1}' | uniq
       register: superusername
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Get Installed Version  (linux)
-      command: sudo -u postgres psql -t -P format=unaligned -c "SELECT version();"
+    # - name: Get Installed Version  (linux)
+    #   command: sudo -u postgres psql -t -P format=unaligned -c "SELECT version();"
+    #   register: pgdataver
+    #   args:
+    #     chdir: "{{ basedirlnx }}"
+    #   when: "'RedHat' in ansible_distribution"
+
+   
+    - name: Get Installed Version 2 (linux)
+      command: sudo -u {{ superusername.stdout }} psql --version
       register: pgdataver
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
-      
-    - name: Get Major Version
-      command: sudo -u postgres  psql -t -P format=unaligned -c "SHOW server_version;"
-      register: majorver
-      args:
-        chdir: "{{ basedirlnx }}"
-      when: "'RedHat' in ansible_distribution"  
+
+   
+    - name: cleanver 
+      set_fact:
+        pgdataverclean: "{{ pgdataver.stdout | regex_search('([0-9]+\\.[0-9]+)', '\\1') }}"
+        majorver: "{{ pgdataver.stdout | regex_search('([0-9]+)', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+    
+
+    # - name: Get Major Version
+    #   command: sudo -u postgres  psql -t -P format=unaligned -c "SHOW server_version;"
+    #   register: majorver
+    #   args:
+    #     chdir: "{{ basedirlnx }}"
+    #   when: "'RedHat' in ansible_distribution"  
+    
+   
 
     - name: Get Port
       command: sudo -u postgres psql -U postgres -t -c "SHOW port;"
@@ -93,29 +135,29 @@
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"  
 
-    - name: Check latest version (above ver 10 linux)
-      shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+' | sort -V | tail -1
-      register: latestver
-      args:
-        chdir: '/var/lib'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "majorver.stdout.split('.')[0] | int >= 11"
+    # - name: Check latest version (above ver 10 linux)
+    #   shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+' | sort -V | tail -1
+    #   register: latestver
+    #   args:
+    #     chdir: '/var/lib'
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"
+    #     - "majorver.stdout.split('.')[0] | int >= 11"
         
-    - name: Check latest version (above ver 10 linux)
-      shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
-      register: latestverold
-      args:
-        chdir: '/var/lib'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "majorver.stdout.split('.')[0] | int < 11"
+    # - name: Check latest version (above ver 10 linux)
+    #   shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
+    #   register: latestverold
+    #   args:
+    #     chdir: '/var/lib'
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"
+    #     - "majorver.stdout.split('.')[0] | int < 11"
     
     
-    - name: check latest version  (linux)
-      debug:
-        var: latestver.stdout[1:]
-      when: "'RedHat' in ansible_distribution"
+    # - name: check latest version  (linux)
+    #   debug:
+    #     var: latestver.stdout[1:]
+    #   when: "'RedHat' in ansible_distribution"
     
     - name: Set mode 
       set_fact:
@@ -126,20 +168,20 @@
     
     - name: Set fact data dir (linux)
       set_fact:
-        datadirlnx: "{{ pgdatadir.stdout }}"
-        datadirshrt: "{{ pgdatadir.stdout[:-7] }}"
-        postgres_version: "{{ pgdataver.stdout.split()[1] }}"
-        major_ver: "{{ majorver.stdout.split('.')[0] }}"
+        datadirlnx: "{{ pgdatadir }}"
+        datadirshrt: "{{ pgdatadir[:-7] }}"
+        postgres_version: "{{ pgdataverclean[0] }}"
+        major_ver: "{{ majorver[0] }}"
         portdb: "{{ portpostgre.stdout }}"
         superusers: "{{ superusername.stdout}}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Set updateflag
-      set_fact:
-        needupdates: y
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "postgres_version != latestver.stdout[1:]"
+    # - name: Set updateflag
+    #   set_fact:
+    #     needupdates: y
+    #   when: 
+    #     - "'RedHat' in ansible_distribution"
+    #     - "postgres_version != latestver.stdout[1:]"
 
     - name: Version Check  (linux)
       debug:
@@ -173,7 +215,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'Version':'{{ postgres_version}}', 'datadir': '{{ datadirlnx }}', 'databaseplatform': 'PostgreSQL', 'Home':'{{ basedirlnx }}', 'os_user': '{{ superusers }}', 'port': '{{ portdb }}', 'mode': '{{ psqlmode }}'}
+                        CAMap = {'Postgre_Version':'{{ postgres_version}}', 'Postgre_DataDir': '{{ datadirlnx }}', 'Postgre_Home':'{{ basedirlnx }}', 'Postgre_User': '{{ superusers }}', 'Postgre_Port': '{{ portdb }}', 'Postgre_Mode': '{{ psqlmode }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
