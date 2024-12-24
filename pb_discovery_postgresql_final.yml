@@ -2,10 +2,6 @@
   gather_facts: yes
   name: System Discovery
   vars:
-    installername: postgresqlinstall.exe
-    urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
-    service_pattern: postgresql
-    needupdates: n
     psqlmode: 'HA-Standby'
   tasks:
     - name: Gather system facts
@@ -23,10 +19,6 @@
 
     #linux script
 
-    
-    
-    
-    
     - name: Find the path of psql  (linux)
       command: which psql
       register: psql_path
@@ -40,103 +32,100 @@
       args:
         chdir: '/var/lib'
       when: "'RedHat' in ansible_distribution"
+    
+   
 
     - name: Set fact base dir (linux)
       set_fact:
         basedirlnx: "{{ binpathpsql.stdout[:-4] }}"
-      
+        postmasterloc: "{{ binpathpsql.stdout[:-4] }}postmaster"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: check latest version  (linux)
+      debug:
+        var: postmasterloc
       when: "'RedHat' in ansible_distribution"
 
-  
-    - name: Find the path of postgre data  (linux)
-      command: sudo -u postgres psql -t -P format=unaligned -c "SHOW data_directory;"
-      register: pgdatadir
+
+    - name: get datadirectory postgre
+      shell: ps aux | grep "{{ postmasterloc }}" | grep -oP '(?<=-D )\S+'
+      register: chkdatadir
       args:
-        chdir: "{{ basedirlnx }}"
+        chdir: '/var/lib'
       when: "'RedHat' in ansible_distribution"
+
+    
+    - name: Clean Data Dir
+      set_fact:
+        pgdatadir: "{{ chkdatadir.stdout_lines[0] }}"
+      when: "'RedHat' in ansible_distribution"
+
 
     - name: Find superuser 
-      command: sudo -u postgres psql -t -P format=unaligned -c "SELECT usename AS username FROM pg_user WHERE usesuper = true;"
+      shell: ps -ef | grep postmaster | grep -v grep | awk '{print $1}' | uniq
       register: superusername
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Get Installed Version  (linux)
-      command: sudo -u postgres psql -t -P format=unaligned -c "SELECT version();"
+
+   
+    - name: Get Installed Version 2 (linux)
+      command: sudo -u {{ superusername.stdout }} psql --version
       register: pgdataver
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"
-      
-    - name: Get Major Version
-      command: sudo -u postgres  psql -t -P format=unaligned -c "SHOW server_version;"
-      register: majorver
-      args:
-        chdir: "{{ basedirlnx }}"
-      when: "'RedHat' in ansible_distribution"  
 
-    - name: Get Port
-      command: sudo -u postgres psql -U postgres -t -c "SHOW port;"
+   
+    - name: cleanver 
+      set_fact:
+        pgdataverclean: "{{ pgdataver.stdout | regex_search('([0-9]+\\.[0-9]+)', '\\1') }}"
+        majorver: "{{ pgdataver.stdout | regex_search('([0-9]+)', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+    
+    
+
+    - name: Retrieve PostgreSQL port
+      ansible.builtin.shell: "sudo lsof -i -P -n | grep postgres | awk '{print $9}' | sed 's/.*://' | head -n 1"
       register: portpostgre
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"  
-    
+
+
+    # - name: test port  (linux)
+    #   debug:
+    #     var: testpostgre
+    #   when: "'RedHat' in ansible_distribution"
+   
+
     - name: Get mode
-      command: sudo -u postgres psql -U postgres -t -c "select pg_is_in_recovery();"
+      ansible.builtin.shell: "if [ -f {{ pgdatadir }}recovery.signal ]; then echo 'true'; else echo 'false'; fi"
       register: modepostgre
       args:
         chdir: "{{ basedirlnx }}"
       when: "'RedHat' in ansible_distribution"  
-
-    - name: Check latest version (above ver 10 linux)
-      shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+' | sort -V | tail -1
-      register: latestver
-      args:
-        chdir: '/var/lib'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "majorver.stdout.split('.')[0] | int >= 11"
-        
-    - name: Check latest version (above ver 10 linux)
-      shell: curl -s https://www.postgresql.org/ftp/source/ | grep -Po 'v{{ majorver.stdout.split('.')[0] }}\.[0-9]+\.[0-9]+' | sort -V | tail -1
-      register: latestverold
-      args:
-        chdir: '/var/lib'
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "majorver.stdout.split('.')[0] | int < 11"
-    
-    
-    - name: check latest version  (linux)
-      debug:
-        var: latestver.stdout[1:]
-      when: "'RedHat' in ansible_distribution"
+   
     
     - name: Set mode 
       set_fact:
         psqlmode: 'standalone'
       when: 
         - "'RedHat' in ansible_distribution"
-        - "modepostgre.stdout != 't'" 
+        - "modepostgre.stdout != 'true'" 
     
     - name: Set fact data dir (linux)
       set_fact:
-        datadirlnx: "{{ pgdatadir.stdout }}"
-        datadirshrt: "{{ pgdatadir.stdout[:-7] }}"
-        postgres_version: "{{ pgdataver.stdout.split()[1] }}"
-        major_ver: "{{ majorver.stdout.split('.')[0] }}"
+        datadirlnx: "{{ pgdatadir }}"
+        datadirshrt: "{{ pgdatadir[:-7] }}"
+        postgres_version: "{{ pgdataverclean[0] }}"
+        major_ver: "{{ majorver[0] }}"
         portdb: "{{ portpostgre.stdout }}"
         superusers: "{{ superusername.stdout}}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: Set updateflag
-      set_fact:
-        needupdates: y
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - "postgres_version != latestver.stdout[1:]"
 
     - name: Version Check  (linux)
       debug:
@@ -149,8 +138,6 @@
       when: "'RedHat' in ansible_distribution"
 
    
-      
-
     - name: Push custom attributes to selected server
       shell: |
         ./python3 - << 'EOF'
@@ -170,7 +157,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'Version':'{{ postgres_version}}', 'datadir': '{{ datadirlnx }}', 'databaseplatform': 'PostgreSQL', 'Home':'{{ basedirlnx }}', 'os_user': '{{ superusers }}', 'port': '{{ portdb }}', 'mode': '{{ psqlmode }}'}
+                        CAMap = {'Postgre_Version':'{{ postgres_version}}', 'Postgre_DataDir': '{{ datadirlnx }}', 'Postgre_Home':'{{ basedirlnx }}', 'Postgre_User': '{{ superusers }}', 'Postgre_Port': '{{ portdb }}', 'Postgre_Mode': '{{ psqlmode }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
@@ -199,6 +186,12 @@
         path: HKLM:\SOFTWARE\PostgreSQL\Installations
       register: postgres_installations
       when: "'Windows' in ansible_distribution"
+    
+    - name: Get PostgreSQL installation base directory from registry (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Services
+      register: postgres_services
+      when: "'Windows' in ansible_distribution"
 
     - name: Get Global PostgreSQL (windows)
       win_reg_stat:
@@ -214,6 +207,7 @@
     - name: Get the first installation ID (windows)
       set_fact:
         installation_id: "{{ postgres_installations.sub_keys[0] }}"
+        services_id: "{{ postgres_services.sub_keys[0] }}"
       when: "'Windows' in ansible_distribution"
 
     - name: Retrieve installation directory (windows)
@@ -221,6 +215,13 @@
         path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
       register: postgres_installation_dir2
       when: "'Windows' in ansible_distribution"
+
+    - name: Retrieve services directory (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Services\{{ services_id }}
+      register: postgres_services_dir2
+      when: "'Windows' in ansible_distribution"
+
 
     
     
@@ -233,86 +234,44 @@
         CompleteVer: "{{ postgres_installation_dir2.properties['CLT_Version']['value'] }}"
         serviceid: "{{ postgres_installation_dir2.properties['Service ID']['value'] }}"
         superuser: "{{ postgres_installation_dir2.properties['Super User']['value'] }}"
-
+        postgreport: "{{ postgres_services_dir2.properties['Port']['value'] }}"
       when: "'Windows' in ansible_distribution"
 
-    - name: Execute SQL command to get PostgreSQL port
-      win_shell: |
-        $env:PGPASSWORD = "P@ssw0rdnh2"
-        {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "SHOW port;" -t
-      become: yes
-      become_method: runas
-      become_user: postgres
-      register: postgres_port
-      when: "'Windows' in ansible_distribution"
-
-    - name: Display the PostgreSQL port
-      debug:
-        msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
-      when: "'Windows' in ansible_distribution"
-
-    - name: Execute SQL command to get PostgreSQL port
-      win_shell: |
-        $env:PGPASSWORD = "P@ssw0rdnh2"
-        {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
-      become: yes
-      become_method: runas
-      become_user: postgres
+ 
+    - name: Check if recovery.signal file exists
+      win_stat:
+        path: "{{ datadir }}\\recovery.signal"  # Adjust this path as needed
       register: postgremode
       when: "'Windows' in ansible_distribution"
-    
+
+    - name: Display if recovery.signal exists
+      debug:
+        msg: "The recovery.signal file exists."
+      when: 
+        - "'Windows' in ansible_distribution"
+        - postgremode.stat.exists
+
+    - name: Display if recovery.signal does not exist
+      debug:
+        msg: "The recovery.signal file does not exist."
+      when: 
+        - "'Windows' in ansible_distribution"
+        - not postgremode.stat.exists
+        
+
     - name: Set mode (windows)
       set_fact:
         psqlmode: 'standalone'
       when: 
         - "'Windows' in ansible_distribution"
-        - "postgremode.stdout != 't'" 
+        - "not postgremode.stat.exists" 
 
     - name: Set fact port  (windows)
       set_fact:
-        portpsql: "{{ postgres_port.stdout.strip() }}"
+        portpsql: "{{ postgreport }}"
       when: "'Windows' in ansible_distribution"
        
-    - name: Check Version
-      win_shell: |
-          # Ensure PowerShell uses TLS 1.2
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-          # Alternatively, use TLS 1.3 if supported
-          # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
-
-          # Now run your Invoke-WebRequest command
-          $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
-
-          # Extract version numbers that match "v15.x.x"
-          $versions = $response.Content -split "`n" | ForEach-Object {
-              if ($_ -match 'v{{ installedver }}\.[0-9]+') {
-                  $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
-                  if ($matches.Success) {
-                      $matches.Value
-                  }
-              }
-          }
-
-          # Sort the versions and select the latest one
-          $latest_version = $versions | Sort-Object | Select-Object -Last 1
-
-          # Display the latest version
-          $latest_version
-      register: latestver
-      when: "'Windows' in ansible_distribution"
-    
-    - name: check latest version  (windows)
-      debug:
-        var: latestver.stdout[1:-2]
-      when: "'Windows' in ansible_distribution"
-
-    - name: Set updateflag
-      set_fact:
-        needupdates: y
-      when: 
-        - "'Windows' in ansible_distribution"
-        - "installedver != latestver.stdout[1:-2]"
+   
 
     - name: Create a temporary Python script file
       win_shell: |
@@ -333,7 +292,7 @@
                 if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'Version':'{{ CompleteVer }}', 'datadir': '{{ datadir }}','databaseplatform': 'PostgreSQL', 'Home':'{{ basedir }}','os_user': '{{ superuser }}', 'port': '{{ portpsql }}', 'mode': '{{ psqlmode }}'}
+                        CAMap = {'Postgresql_Version':'{{ CompleteVer }}', 'Postgresql_Datadir': '{{ datadir }}', 'Postgresql_Home':'{{ basedir }}','Postgresql_User': '{{ superuser }}', 'Postgresql_Port': '{{ portpsql }}', 'Postgresql_Mode': '{{ psqlmode }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

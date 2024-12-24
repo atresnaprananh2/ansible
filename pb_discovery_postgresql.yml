@@ -1,11 +1,7 @@
-- hosts: win2
+- hosts: all
   gather_facts: yes
   name: System Discovery
   vars:
-    installername: postgresqlinstall.exe
-    urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
-    service_pattern: postgresql
-    needupdates: n
     psqlmode: 'HA-Standby'
   tasks:
     - name: Gather system facts
@@ -251,16 +247,18 @@
     - name: Display if recovery.signal exists
       debug:
         msg: "The recovery.signal file exists."
-      when: postgremode.stat.exists
+      when: 
+        - "'Windows' in ansible_distribution"
+        - postgremode.stat.exists
 
     - name: Display if recovery.signal does not exist
       debug:
         msg: "The recovery.signal file does not exist."
-      when: not postgremode.stat.exists
+      when: 
+        - "'Windows' in ansible_distribution"
+        - not postgremode.stat.exists
+        
 
-
-  
-    
     - name: Set mode (windows)
       set_fact:
         psqlmode: 'standalone'
