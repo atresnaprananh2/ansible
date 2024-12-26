@@ -187,7 +187,7 @@
       register: postgres_installations
       when: "'Windows' in ansible_distribution"
     
-    - name: Get PostgreSQL installation base directory from registry (windows)
+    - name: Get PostgreSQL installation services directory from registry (windows)
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL\Services
       register: postgres_services

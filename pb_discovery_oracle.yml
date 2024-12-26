@@ -34,6 +34,16 @@
       shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
       register: oracle_user
       when: "'RedHat' in ansible_distribution"
+    - name: check patch
+      debug:
+        var: oracle_user
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - set variables user
+      set_fact:
+        orclusr: "{{ oracle_user.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
 
     - name:  Preparation - set variables
       set_fact:

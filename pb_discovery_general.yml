@@ -1,0 +1,1216 @@
+- name: System DB Discovery
+  hosts: postgre 
+  gather_facts: yes
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
+  vars:   
+    #change the patch information if needed
+    - mysql_installation_2: {}
+    - mysql_installation: {}
+    - warningmsg: ""
+    - chkdb2: ""
+    - chkoracle: ""
+    - chkpostgre: ""
+    - chkmysql: ""
+    - chksqlserver: ""
+    - patch_description: 'No Interim Patch installed'
+    - isclustered: 'no'
+    - pmonoutput: ""
+    - patchdescval: ""
+    - oracledirinfo: ""
+    - oracleprocessuser: ""
+    - oracleenvuser: ""
+    - postgrestatmode: ""
+  tasks:
+   
+
+    - name: check oracle instance
+      shell: ps -ef | grep ora_pmon | grep -v grep
+      register: chkoracleobj
+      ignore_errors: true
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+    - name: Check db2
+      shell: "sudo -i -u db2inst1 db2level"
+      register: chkdb2obj
+      ignore_errors: true
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+
+    - name: Check MySQL 
+      shell: ". /etc/profile && which mysql"
+      register: chkmysqlobj
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - isCheckMySQL == 'Y'
+        
+    - name: check postgresql
+      command: which psql
+      register: chkpsqlobj
+      ignore_errors: yes
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables check oracle
+      set_fact:
+        chkoracle: "{{ chkoracleobj.failed }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - set variables check db2
+      set_fact:
+        chkdb2: "{{ chkdb2obj.failed }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables check mysql
+      set_fact:
+        chkmysql: "{{ chkmysqlobj.failed }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables check postgresql
+      set_fact:
+        chkpostgre: "{{ chkpsqlobj.failed }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+
+    - name: set msg db2
+      set_fact:
+        warningmsg: "{{ warningmsg }} DB2 does not exist;"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == true
+    
+    - name: set msg oracle
+      set_fact:
+        warningmsg: "{{ warningmsg }} Oracle does not detected;"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == true
+    
+    - name: set msg mysql
+      set_fact:
+        warningmsg: "{{ warningmsg }} MySQL does not detected;"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == true
+    
+    - name: set msg postgresql
+      set_fact:
+        warningmsg: "{{ warningmsg }} PostgreSQL does not detected;"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == true
+
+    - name: Push Warning db2
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'Warning':'{{ warningmsg }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+     
+     #linux script db2
+  
+    - name: Check db2 user
+      shell: "cat /etc/group | grep db2 | awk -F: '{print $1}'"
+      register: db2user
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    - name: chk db2 user log
+      debug:
+        var: db2user
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+
+    - name: Get Db2 version using db2level
+      shell: "sudo -i -u db2inst1 db2level"
+      register: db2_output
+      ignore_errors: true
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+
+    - name: Extract Db2 version using awk
+      shell: "echo '{{ db2_output.stdout }}' | awk -F'\"' '/Informational tokens/ {print $2}'"
+      register: db2_version
+      when: 
+        - db2_output.stdout is defined
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+
+    - name: Display Db2 version
+      debug:
+        msg: "Db2 version: {{ db2_version.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    
+    - name: Extract Db2 special build using awk
+      shell: "echo '{{ db2_output.stdout }}' | awk -F'\"' '/Informational tokens/ {print $4}'"
+      register: db2_special_build
+      when: 
+        - db2_output.stdout is defined
+        - "'RedHat' in ansible_distribution"
+        - isCheckDB2 == 'Y'
+        - chkdb2 == false
+
+    - name: Display Db2 special build
+      debug:
+        msg: "Db2 special build: {{ db2_special_build.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    - name: Get Db2 user home directory
+      ansible.builtin.shell: |
+        getent passwd db2inst1 | cut -d: -f6
+      register: db2_home
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+  
+    - name: Show Db2 home path
+      ansible.builtin.debug:
+        msg: "Db2 home directory: {{ db2_home.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    - name: Get db 2 installation path 
+      shell: "find /opt -name db2 -type f 2>/dev/null"
+      register: db2installationpath
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    - name: Show Db2 installation path
+      ansible.builtin.debug:
+        msg: "Db2 installation directory: {{ db2installationpath.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    - name: Show Db2 Home path
+      ansible.builtin.debug:
+        var: db2_home
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+
+    - name: Get Db2 root free space
+      ansible.builtin.shell: |
+        df -h "$(dirname $(dirname {{ db2installationpath.stdout }}))"
+      register: db2_free_space
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+    
+    - name: Debug raw output
+      debug:
+        var: db2_free_space.stdout
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+
+
+    - name: Show Db2 free root space
+      ansible.builtin.debug:
+        var:  db2_free_space.stdout.splitlines()[1]
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+      
+
+    - name: set variables db2
+      set_fact:
+        db2availspace: "{{  db2_free_space.stdout.splitlines()[1].split()[3]  }}"
+        db2user: "{{ db2user.stdout_lines | join(';') }}"
+        db2ver: "{{ db2_version.stdout }}"
+        db2home: "{{ db2_home.stdout }}"
+        db2path: "{{ db2installationpath.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+      
+    - name: set variables 2 db2
+      set_fact:
+        db2fixpack: "{{ db2_special_build.stdout }}" 
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - db2_output.stdout is defined
+        - chkdb2 == false
+
+    - name: Push custom attributes to selected server for db2
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'DB2_Rootspace':'{{ db2availspace }}', 'DB2_User':'{{ db2user }}', 'DB2_Version':'{{ db2ver }}', 'DB2_Specialbuilds':'{{ db2fixpack }}', 'DB2_Home':'{{ db2home }}', 'DB2_InstallationPath':'{{ db2path }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output_db2
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+
+    - name: Display Python script output for db2
+      debug:
+        msg: "{{ python_output_db2.stdout }}" 
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkdb2 == false
+     
+     
+     #linux script Oracle 
+    
+    - name: Get Oracle PMON processes
+      shell: ps -ef | grep ora_pmon | grep -v grep
+      register: pmon_output
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+    
+    - name: Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+    
+    - name:  Preparation - set variables pmonoutput Oracle
+      set_fact:
+        pmonoutput: "{{ pmon_output.stdout}}"
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name:  Preparation - set variables Oracle
+      set_fact:
+        isclustered: 'yes'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - "'+ASM' in pmonoutput"
+        - isCheckOracle == 'Y'
+        - chkoracle == false
+
+    - name: Find the path oracle home  (linux)
+      command: grep -E '^[^#]' /etc/oratab
+      register: oraclehomeinfo
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Find the latest patch installed Oracle
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+      register: oraclelastpatch
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: check patch Oracle
+      debug:
+        var: oraclelastpatch
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Extract patch description Oracle
+      set_fact:
+        patchdesc: "{{ oraclelastpatch.stdout | regex_search('Patch description:  \"(.*?)\"', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+        
+    - name:  Preparation - set variables patchdesc Oracle
+      set_fact:
+        patchdescval: "{{ patchdesc }}"
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+
+    - name: check patch Oracle
+      set_fact:
+        patch_description: "{{ patchdesc[0] }}" 
+      when:  
+        - patchdescval != ''
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+
+    - name: Display the extracted patch description Oracle
+      debug:
+        msg: "Extracted Patch Description: {{ patch_description }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+        
+
+    - name: check latest version  (linux) Oracle
+      debug:
+        var: oraclehomeinfo.stdout.split(':')[1]
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: check autorun  (linux) Oracle
+      debug:
+        var: oraclehomeinfo.stdout.split(':')
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    
+    - name: Set fact oratab (linux) Oracle
+      set_fact:
+        oraclehome: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
+        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
+        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
+        byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
+        osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
+        patchloc: "/opt/opsware/Patching/"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Get Oracle Home directory size in GB
+      ansible.builtin.shell: |
+        du -sBG {{ oraclehome }} | cut -f1 | tr -d 'G'
+      register: oracle_home_size
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Display Oracle Home directory size in GB
+      debug:
+        msg: "Oracle Home Size: {{ oracle_home_size.stdout }} GB"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Check root filesystem space Oracle
+      debug:
+        msg: "Root filesystem space: {{ byteleft | float * (1/1000000000)  }} GB available"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: "Get Oracle Version"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
+      register: oracleversion
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+    
+    - name: check oracle version  (linux)
+      debug:
+        var:   " oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') "
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: "Get Port Oracle"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/bin/lsnrctl status' 
+        # when: "oracle_binary_version | splitVersion == '12'"
+      register: oracleport
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+
+    - name: "Get Opatch Version Oracle"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/OPatch/opatch version'
+      register: opatchversion
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: check opatch version  (linux) Oracle
+      debug:
+        var: "opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '')"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+  
+    - name: Set fact version (linux) Oracle
+      set_fact:
+        oracleversion: "{{ oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') }}"
+        opatchversion: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
+        oraport: "{{ oracleport.stdout | regex_findall('PORT=([0-9]+)', '\\1') }}"
+        orahomesize: "{{ oracle_home_size.stdout }}"
+        rootsize: "{{ byteleft | float * (1/1000000000)  }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Extract major Oracle
+      set_fact:
+        oracle_major_version: "{{ oracleversion | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Display major Oracle version
+      debug:
+        msg: "The Oracle major version is: {{ oracle_major_version }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+    
+    - name: check port   (linux)
+      debug:
+        var: oraport[0]
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+      
+    - name: Check ownership of known Oracle directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: oracle_dir_info
+      with_items:
+        - "/u01/app/oracle"
+        - "/opt/oracle"
+        - "/home/oracle"
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: set oracledirinfo
+      set_fact:
+        oracledirinfo: "{{ oracle_dir_info.results }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Identify the user owning Oracle directories
+      set_fact:
+        oracle_os_user: "{{ oracledirinfo | selectattr('stat.exists', 'equalto', true) | map(attribute='stat.pw_name') | first }}"
+      when: 
+        - oracledirinfo | selectattr('stat.exists', 'equalto', true) | list | length > 0
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+        
+
+    - name: Check for running Oracle processes
+      ansible.builtin.shell: "ps -eo user,comm | grep pmon | awk '{print $1}' | uniq"
+      register: oracle_process_user
+      ignore_errors: yes
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+    
+    - name: Set oracleprocessuser
+      set_fact:
+        oracleprocessuser: "{{ oracle_process_user.stdout_lines[0] }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Set fact for Oracle process user if Oracle directories not found
+      set_fact:
+        oracle_os_user: "{{ oracleprocessuser }}"
+      when: 
+        - oracleprocessuser is not defined
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+        
+
+    - name: Search for Oracle environment variables in all users
+      ansible.builtin.shell: "cat /etc/passwd | cut -d: -f1 | xargs -n 1 -I {} bash -c 'echo User: {} && sudo -u {} env | grep ORACLE_HOME' | grep User"
+      register: oracle_env_user
+      ignore_errors: yes
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Set oracleenvuser
+      set_fact:
+        oracleenvuser: "{{ oracle_env_user.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Set fact for Oracle environment user if not already found
+      set_fact:
+        oracle_os_user: "{{ oracleenvuser | regex_findall('User: (.+)') | first }}"
+      when: 
+        - oracle_os_user is not defined and oracleenvuser | length > 0
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Display Oracle OS user
+      debug:
+        msg: "Oracle OS User: {{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}"
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Run ps command and grep for tnslsnr Oracle
+      shell: ps -ef | grep tnslsnr | grep -v grep
+      register: ps_output
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Extract tnslsnr path Oracle
+      shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
+      register: tnslsnr_path
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Display tnslsnr executable path without newline Oracle
+      debug:
+        msg: |
+          {% if tnslsnr_path.stdout != "" %}
+            The Oracle listener executable (tnslsnr) path is: {{ tnslsnr_path.stdout }}
+          {% else %}
+            tnslsnr executable not found.
+          {% endif %}
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Extract listener name from process details Oracle
+      set_fact:
+        listener_name: "{{ ps_output.stdout | regex_search('tnslsnr\\s+(\\S+)') | replace('tnslsnr ', '') | trim }}"
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Display listener name Oracle
+      debug:
+        msg: "The Oracle listener name is: {{ listener_name }}"
+      when:
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Push custom attributes to selected server Oracle
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'RootSpace': '{{ rootsize }}','Oracle_HomeSpace': '{{ orahomesize }}', 'Oracle_Cluster': '{{ isclustered }}', 'Oracle_OSVersion': '{{ osver }}', 'Oracle_DBVersion':'{{ oracleversion }}', 'Oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'Oracle_Instance': '{{ instance }}','Oracle_Listener' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Oracle_Backup_Loc': 'NA', 'patch_file_location': '{{ patchloc }}','Oracle_OPatch_Version':'{{ opatchversion }}', 'Oracle_port': '{{ oraport[0] }}', 'Oracle_autorun': '{{ autorun }}', 'Oracle_PatchInfo': '{{ patch_description }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output_oracle
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output_oracle.stdout }}" 
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkoracle == false
+
+    #linux script Postgresql
+
+    - name: Find the path of psql  (linux)
+      command: which psql
+      register: psql_path
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    - name: Resolve the real path of psql  (linux)
+      command: readlink -f "{{ psql_path.stdout }}"
+      register: binpathpsql
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ binpathpsql.stdout[:-4] }}"
+        postmasterloc: "{{ binpathpsql.stdout[:-4] }}postmaster"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+    
+    - name: check latest version  (linux)
+      debug:
+        var: postmasterloc
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+
+
+    - name: get datadirectory postgre
+      shell: ps aux | grep "{{ postmasterloc }}" | grep -oP '(?<=-D )\S+'
+      register: chkdatadir
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    
+    - name: Clean Data Dir
+      set_fact:
+        pgdatadir: "{{ chkdatadir.stdout_lines[0] }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    - name: Find superuser 
+      shell: ps -ef | grep postmaster | grep -v grep | awk '{print $1}' | uniq
+      register: superusername
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+   
+    - name: Get Installed Version 2 (linux)
+      command: sudo -u {{ superusername.stdout }} psql --version
+      register: pgdataver
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+   
+    - name: cleanver 
+      set_fact:
+        pgdataverclean: "{{ pgdataver.stdout | regex_search('([0-9]+\\.[0-9]+)', '\\1') }}"
+        majorver: "{{ pgdataver.stdout | regex_search('([0-9]+)', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+    
+
+    - name: Retrieve PostgreSQL port
+      ansible.builtin.shell: "sudo lsof -i -P -n | grep postgres | awk '{print $9}' | sed 's/.*://' | head -n 1"
+      register: portpostgre
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: 
+        - "'RedHat' in ansible_distribution"  
+        - chkpostgre == false
+
+    - name: Get mode postgresql
+      ansible.builtin.shell: "if [ -f {{ pgdatadir }}recovery.signal ]; then echo 'true'; else echo 'false'; fi"
+      register: modepostgre
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: 
+        - "'RedHat' in ansible_distribution"  
+        - chkpostgre == false
+        
+    
+    - name: Set mode postgrestatmode
+      set_fact:
+        postgrestatmode: "{{ modepostgre.stdout }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - "modepostgre.stdout != 'true'" 
+        - chkpostgre == false
+    
+    - name: Set mode postgresql
+      set_fact:
+        psqlmode: 'standalone'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - "postgrestatmode != 'true'" 
+        - chkpostgre == false
+    
+    - name: Set fact data dir (linux)
+      set_fact:
+        datadirlnx: "{{ pgdatadir }}"
+        datadirshrt: "{{ pgdatadir[:-7] }}"
+        postgres_version: "{{ pgdataverclean[0] }}"
+        major_ver: "{{ majorver[0] }}"
+        portdb: "{{ portpostgre.stdout }}"
+        superusers: "{{ superusername.stdout}}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    - name: Version Check  (linux) postgresql
+      debug:
+        var: postgres_version
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    - name: Major Version Check  (linux) postgresql
+      debug:
+        var: major_ver
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+   
+    - name: Push custom attributes to selected server postgresql
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'Postgre_Version':'{{ postgres_version}}', 'Postgre_DataDir': '{{ datadirlnx }}', 'Postgre_Home':'{{ basedirlnx }}', 'Postgre_User': '{{ superusers }}', 'Postgre_Port': '{{ portdb }}', 'Postgre_Mode': '{{ psqlmode }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output_psql
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output_psql.stdout }}" 
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkpostgre == false
+    
+    #Linux MySQL Script
+
+    - name: Check MySQL installation
+      shell: ". /etc/profile && which mysql"
+      register: mysql_path
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: Resolve the real path of mysql  (linux)
+      command: readlink -f "{{ mysql_path.stdout }}"
+      register: mysql_path
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: chk1 mysql
+      debug:
+        var: mysql_path
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: get mysql service name
+      shell: systemctl list-units --type=service | grep mysql | cut -d '.' -f1
+      register: svcname
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: svcname mysql
+      debug:
+        var: svcname
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: get datadir mysql
+      shell: sudo grep -i 'datadir' /etc/my.cnf
+      register: mysqldatadir
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: chk2 mysql
+      debug:
+        var: mysqldatadir
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+     
+    - name: Set fact base dir (linux) mysql
+      set_fact:
+        basedirlnx: "{{ mysql_path.stdout[:-5] }}"
+      
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: Get Installed Version  (linux) mysql
+      command: "{{ basedirlnx }}mysql --version"
+      register: mysqlversion
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: chk2 mysql
+      debug:
+        var: mysqlversion.stdout
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: Extract MySQL version number
+      set_fact:
+        mysql_version5: "{{ mysqlversion.stdout | regex_search('Distrib ([0-9.]+)', '\\1') }}"
+        mysql_version8: "{{ mysqlversion.stdout | regex_search('Ver\\s([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: Extract MySQL version number 5
+      set_fact:
+        mysql_version: "{{ mysql_version5 }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_version5 | length != 0
+        - chkmysql == false
+    
+    - name: Extract MySQL version number 8
+      set_fact:
+        mysql_version: "{{ mysql_version8 }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_version8 | length != 0
+        - chkmysql == false
+
+    - name: Show the MySQL version
+      debug:
+        msg: "MySQL version is {{ mysql_version }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: Extract MySQL major version
+      set_fact:
+        major_ver: "{{ mysql_version[0][:1] }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: Show the MySQL major version
+      debug:
+        msg: "MySQL version is {{ major_ver }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+
+
+    - name: Check if MySQL configuration file exists
+      stat:
+        path: /etc/my.cnf
+      register: mysql_conf_stat
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+   
+    - name: Read MySQL configuration file (if exists)
+      shell: "cat /etc/my.cnf | grep port"
+      register: mysql_port
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_conf_stat.stat.exists
+        - chkmysql == false
+
+
+    - name: Debug MySQL port grep output
+      debug:
+        var: mysql_port.stdout_lines
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: Clean spaces
+      set_fact:
+        mysqlportcln: "{{ mysql_port.stdout_lines | replace(' ', '') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+
+    - name: Set default MySQL port if not found
+      set_fact:
+        mysql_port_value: "{{ mysqlportcln | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: Display MySQL port
+      debug:
+        msg: "MySQL is running on port {{ mysql_port_value }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+   
+    # change to check physical data directory
+    - name: clean from spaces
+      set_fact:
+        datadirlnxcln: "{{ mysqldatadir.stdout | replace(' ', '')  }}"
+      when: 
+        - "'RedHat' in ansible_distribution"  
+        - chkmysql == false
+    - name: Set Fact discovery vars (linux)
+      set_fact:
+        datadirlnx: "{{ datadirlnxcln | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"  
+
+    - name: Display MySQL datadirlinx
+      debug:
+        var: mysqldatadir
+      when: 
+        - "'RedHat' in ansible_distribution" 
+        - chkmysql == false
+
+    - name: get physical data dir content
+      shell: |
+        ./python3 - << 'EOF'
+        import os
+
+        # Path to the MySQL data directory
+        mysql_data_dir = '{{ datadirlnx[0] }}'
+
+        # List all subdirectories (databases)
+        databases = [name for name in os.listdir(mysql_data_dir) 
+                    if os.path.isdir(os.path.join(mysql_data_dir, name)) 
+                    and name not in ('mysql', 'performance_schema', 'information_schema', 'sys')]
+
+        print(databases)
+        EOF
+      register: mysql_databases
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution"   
+        - chkmysql == false
+    
+
+    - name: Extract Primary Databases
+      set_fact:
+        primary_databases: "{{ mysql_databases.stdout | replace(\"'\", '\"') | from_json }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+    
+    - name: Concatenate the values into one line
+      set_fact:
+        dbconcat: "{{ primary_databases | join(';') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: check db  (linux)
+      debug:
+        var: dbconcat
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+      #check physical mysql installation directory
+    - name: get rootsize
+      shell: du -sm {{ datadirlnx[0] }}/*/ | awk '{sum += $1} END {print sum " MB"}'
+      register: mysql_database_size
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: get router info 
+      shell: ls -l | grep 'mysql-router'
+      register: mysql_router_version
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+        - chkmysql == false
+    
+    
+    - name: Retrieve only the version string router
+      set_fact:
+        routerinfo: "{{ mysql_router_version.stdout | regex_search('mysql-router-[^ ]*') | replace('.tar.xz', '') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+        - mysql_router_version.failed == false
+        - chkmysql == false
+
+    - name: get shell info 
+      shell: ls -l | grep 'mysql-shell'
+      register: mysql_shell_version
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+        - chkmysql == false
+    
+    - name: Retrieve only the version string shell
+      set_fact:
+        shellinfo: "{{ mysql_shell_version.stdout | regex_search('mysql-shell-[^ ]*') | replace('.tar.gz', '') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+        - mysql_router_version.failed == false
+        - chkmysql == false
+
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'MySQL_Router':'{{ routerinfo }}', 'MySQL_Shell':'{{ shellinfo }}', 'MySQL_Port':'{{ mysql_port_value[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size.stdout }}', 'MySQL_Version':'{{ mysql_version[0] }}', 'MySQL_Datadir': '{{ datadirlnx[0] }}', 'MySQL_Home':'{{ basedirlnx }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output_mysql
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output_mysql.stdout }}" 
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - chkmysql == false
+   
+
+
+
+   
+
