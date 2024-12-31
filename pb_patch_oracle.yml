@@ -1,5 +1,8 @@
-- hosts: all
+- hosts: oracle12
   gather_facts: true
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
   tasks:
     - name: Preparation - Get Software Policy Attr
       shell: |
