@@ -1,0 +1,93 @@
+- name: Patch Clustered Microsoft SQL Server
+  hosts: winsqlservercls1
+  tasks:
+    - name: Get all cluster nodes
+      win_shell: |
+        Get-ClusterNode | Select-Object -ExpandProperty Name
+      register: cluster_nodes
+
+    - name: Get SQL Server resource owner (active node)
+      win_shell: |
+        (Get-ClusterGroup -Name 'SQL Server (MSSQLSERVER)').OwnerNode
+      register: active_node
+    
+    - name: Debug raw output of the command
+      debug:
+        var: active_node.stdout
+
+    - name: Extract the cluster node name safely
+      set_fact:
+        cluster_name: >-
+          {{
+            active_node.stdout.splitlines() | select('search', 'Up') | first | default('') | regex_replace('\\s+.*$', '')
+          }}
+
+    - name: Extract only the cluster name 2
+      set_fact:
+        active_node_cln: "{{ cluster_name.split()[0] }}"
+
+   
+    - name: Debug the extracted cluster name
+      debug:
+        msg: "The cluster node name is {{ active_node_cln }}"
+
+
+    - name: Set active and passive nodes
+      set_fact:
+        active_node: "{{ active_node_cln }}"
+        passive_nodes: "{{ cluster_nodes.stdout_lines | difference([active_node_cln]) }}"
+
+    - name: Debug cluster information
+      debug:
+        msg:
+          - "Active Node: {{ active_node }}"
+          - "Passive Nodes: {{ passive_nodes }}"
+
+    # - name: test check active node
+    #   hosts: "{{ active_node }}"
+    #   tasks:
+    #     - name: Execute ipconfig command
+    #       win_command: ipconfig
+    #       register: ipconfig_output
+
+    #     - name: Display ipconfig output
+    #       debug:
+    #         var: ipconfig_output.stdout
+      
+
+    # - name: Patch passive node
+    #   hosts: "{{ passive_nodes }}"
+    #   tasks:
+    #     - name: Download and install SQL Server patch
+    #       win_shell: |
+    #         # Replace with the actual SQL patching script
+    #         Start-Process -FilePath msiexec.exe -ArgumentList '/i SQLPatch.msi /quiet /norestart' -Wait
+
+    #     - name: Reboot the node
+    #       win_reboot:
+
+    # - name: Failover SQL Server to patched node
+    #   hosts: "{{ passive_nodes | first }}"  # Failover to the first patched passive node
+    #   tasks:
+    #     - name: Move SQL Server resource group
+    #       win_shell: |
+    #         Move-ClusterGroup -Name 'SQL Server'
+
+    # - name: Patch remaining (active) node
+    #   hosts: "{{ active_node }}"
+    #   tasks:
+    #     - name: Download and install SQL Server patch
+    #       win_shell: |
+    #         # Replace with the actual SQL patching script
+    #         Start-Process -FilePath msiexec.exe -ArgumentList '/i SQLPatch.msi /quiet /norestart' -Wait
+
+    #     - name: Reboot the node
+    #       win_reboot:
+
+    # - name: Validate SQL Server cluster state
+    #   hosts: all
+    #   tasks:
+    #     - name: Check SQL Server services
+    #       win_service:
+    #         name: MSSQLSERVER
+    #         state: started

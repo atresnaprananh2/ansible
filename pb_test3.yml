@@ -1,25 +1,32 @@
-- name: Run tasks as another user on a Windows host
-  hosts: win
+- name: Discover and manage Windows cluster nodes
+  hosts: winsqlservercls1
+  gather_facts: false
   tasks:
-    - name: Run a command as another user
-      win_command: whoami
-      become: yes
-      become_method: runas
-      become_user: postgres  # Ensure this user has permission to execute the command
-      register: test1
-      
-    - name: Display the whoami output
-      debug:
-        msg: "The logged-in user is: {{ test1.stdout }}"
+    - name: Discover cluster nodes
+      win_command: |
+        powershell -Command "Get-ClusterNode | ForEach-Object { $_.Name }"
+      register: cluster_nodes_raw
 
+    - name: Parse cluster nodes into a list
+      ansible.builtin.set_fact:
+        cluster_nodes: "{{ cluster_nodes_raw.stdout_lines }}"
 
-    - name: Run a script as another user
-      win_shell: |
-        echo "Running as {{ ansible_user }}"
-      become: yes
-      become_method: runas
-      become_user: administrator  # Ensure this user has permission to execute the script
-      register: test2
-    - name: Display the whoami output
-      debug:
-        msg: "The logged-in user is: {{ test2.stdout }}"
+    - name: Add cluster nodes to a dynamic inventory group
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: windows_cluster
+        ansible_user: Administrator
+        ansible_password: YourPassword
+        ansible_connection: ssh
+        ansible_winrm_transport: basic
+      loop: "{{ cluster_nodes }}"
+
+- name: Manage dynamically discovered cluster nodes
+  hosts: windows_cluster
+  gather_facts: false
+  tasks:
+    - name: Ping the cluster nodes
+      ansible.windows.win_ping:
+
+    - name: Display the hostname of each node
+      ansible.windows.win_shell: hostname

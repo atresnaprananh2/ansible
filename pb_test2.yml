@@ -1,56 +1,37 @@
-- hosts: win
-  name: test playbook
-  gather_facts: yes
-  # vars:
-  #   # ansible_remote_tmp: C:/tmp
-  #   # ansible_user: administrator 
-  #   # ansible_connection: ssh 
-  #   # ansible_port: 22 
-  #   ansible_user: 'postgres'
-  #   ansible_password: 'P@ssw0rdnh2'
-  #   ansible_port: 5985
-  #   ansible_connection: 'winrm'
-  #   ansible_winrm_transport: 'ntlm'
-  #   ansible_winrm_server_cert_validation: 'ignore'
-
+- name: Manage Windows Cluster Nodes
+  hosts: winsqlservercls1
+  gather_facts: no
   tasks:
-   - name: testcmd
-     win_command: |
-         ipconfig
-     register: out 
-   - debug:
-       msg: "{{ out }}"
-   - name: Execute whoami command
-     win_shell: whoami
-     register: whoami_output
+    # Step 1: Get cluster nodes from the cluster virtual IP
+    - name: Retrieve cluster nodes
+      win_shell: |
+        Get-ClusterNode | Select-Object -ExpandProperty Name
+      register: cluster_nodes_output
 
-   - name: Display the whoami output
-     debug:
-       msg: "The logged-in user is: {{ whoami_output.stdout }}"
+    # Step 2: Extract the node names as a list
+    - name: Parse cluster nodes
+      set_fact:
+        cluster_node_list: "{{ cluster_nodes_output.stdout_lines }}"
 
-   - name: Display the whoami output
-     debug:
-       msg: "The logged-in user is: {{ whoami_output.stdout }}"
+    # Step 3: Display the detected nodes (for debugging)
+    - name: Display the list of cluster nodes
+      debug:
+        msg: "Detected cluster nodes: {{ cluster_node_list }}"
 
-   - name: Run a command as another user
-     win_command: whoami
-     become: yes
-     become_method: runas
-     become_user: postgres
-     become_pass: P@ssw0rdnh2
-     register: testuser
-  
-   - name: Display the whoami output
-     debug:
-       msg: "The logged-in user is: {{ testuser.stdout }}"
+    # Step 4: Loop through the cluster nodes and execute tasks
+    - name: Perform actions on each cluster node
+      win_shell: |
+        echo "Performing tasks on node {{ item }}"
+      register: task_result
+      delegate_to: "{{ item }}"
+      loop: "{{ cluster_node_list }}"
+      loop_control:
+        loop_var: item
 
-   
-  #  - name: Ensure a directory exists
-  #    ansible.builtin.file:
-  #      path: C:\Temp\example_directory
-  #      state: directory
-
-
-  
-
-   
+    # Step 5: Display task results for each node
+    - name: Show task result for each node
+      debug:
+        msg: "Result from node {{ item }}: {{ task_result.stdout }}"
+      loop: "{{ cluster_node_list }}"
+      loop_control:
+        loop_var: item

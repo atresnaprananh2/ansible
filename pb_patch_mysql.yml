@@ -1,4 +1,4 @@
-- name: Patch MySQL RHEL
+- name: Patch MySQL 
   hosts: winmysql 
   gather_facts: yes
   name: System Discovery

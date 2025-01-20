@@ -1,0 +1,41 @@
+- hosts: winmysql
+ 
+  name: testscript
+  gather_facts: yes
+
+  tasks:
+ 
+    - name: Search for mysql.exe in all accessible directories
+      win_find:
+        paths:
+          - 'C:\\Program Files'  # Search the entire C: drive
+          - 'C:\\Program Files (x86)'
+        patterns:
+          - 'mysql.exe'
+        recurse: yes  # Recursively search subdirectories
+        file_type: file  # Only search for files
+      register: mysql_search_result
+
+    - name: Check if MySQL was found
+      fail:
+        msg: "MySQL executable not found on the system!"
+      when: mysql_search_result.matched == 0
+
+    - name: Display found MySQL paths
+      debug:
+        var: mysql_search_result.files
+
+    - name: Extract directory path of mysql.exe
+      set_fact:
+        mysql_path_chk: "{{ item.path | regex_replace('\\\\mysql.exe$', '') }}"
+      with_items: "{{ mysql_search_result.files }}"
+      when: mysql_search_result.matched > 0
+
+    - name: Display the MySQL installation directory
+      debug:
+        msg: "MySQL is installed in: {{ mysql_path_chk }}"
+
+    
+
+  
+   

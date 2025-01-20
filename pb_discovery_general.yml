@@ -22,6 +22,9 @@
     - oracleprocessuser: ""
     - oracleenvuser: ""
     - postgrestatmode: ""
+    - mysql_version5: ""
+    - mysql_version8: ""
+    - mysql_version: ""
   tasks:
    
 
@@ -1016,7 +1019,6 @@
       register: mysql_conf_stat
       when: 
         - "'RedHat' in ansible_distribution"
-        - chkmysql == false
 
    
     - name: Read MySQL configuration file (if exists)
@@ -1068,7 +1070,9 @@
     - name: Set Fact discovery vars (linux)
       set_fact:
         datadirlnx: "{{ datadirlnxcln | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
-      when: "'RedHat' in ansible_distribution"  
+      when: 
+        - "'RedHat' in ansible_distribution"  
+        - chkmysql == false
 
     - name: Display MySQL datadirlinx
       debug:
@@ -1135,8 +1139,7 @@
       ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"
-        - (major_ver | int) > 5
-        - chkmysql == false
+      
     
     
     - name: Retrieve only the version string router
@@ -1154,9 +1157,7 @@
       ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"
-        - (major_ver | int) > 5
-        - chkmysql == false
-    
+      
     - name: Retrieve only the version string shell
       set_fact:
         shellinfo: "{{ mysql_shell_version.stdout | regex_search('mysql-shell-[^ ]*') | replace('.tar.gz', '') }}"

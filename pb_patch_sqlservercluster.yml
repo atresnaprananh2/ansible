@@ -1,0 +1,41 @@
+- name: Patch Clustered SQL Server
+  hosts: sql_cluster_nodes
+  vars:
+    - kb_patch_url: "http://example.com/path/to/kb_patch.exe"
+    - kb_patch_file: "kb_patch.exe"
+    - primary_node: "sql-primary"
+    - passive_node: "sql-secondary"
+  tasks:
+    - name: Move SQL Server role to passive node (optional for Active/Passive)
+      win_shell: >
+        Move-ClusterGroup -Name "SQL Server" -Node {{ passive_node }}
+      when: inventory_hostname == active_node
+
+    - name: Download the KB patch to the node
+      win_get_url:
+        url: "{{ kb_patch_url }}"
+        dest: "C:\\temp\\{{ kb_patch_file }}"
+    
+    - name: Install the KB patch
+      win_command: >
+        C:\\temp\\{{ kb_patch_file }} /quiet /norestart
+      register: patch_status
+    
+    - name: Reboot the node if required
+      win_reboot:
+      when: patch_status is changed
+
+    - name: Validate patch installation
+      win_shell: |
+        sqlcmd -Q "SELECT @@VERSION"
+      register: sql_version
+
+    - name: Failback SQL Server role to primary node
+      win_shell: >
+        Move-ClusterGroup -Name "SQL Server" -Node {{ primary_node }}
+      when: inventory_hostname == passive_node
+
+    - name: Cleanup temporary files
+      win_file:
+        path: "C:\\temp\\{{ kb_patch_file }}"
+        state: absent

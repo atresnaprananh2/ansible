@@ -272,7 +272,6 @@
       set_fact:
         patchname: "{{ custattrwin.MySQL_Patchname }}"
         mysqlpatchid: "{{ custattrwin.MySQL_Patchid }}"
-        patchfolder: "{{ custattrwin.MySQL_Patchfolder }}"
         productid: "{{ custattrwin.MySQL_productid }}"
         userdir: "{{ custattrwin.MySQL_userdir }}"
       when: "'Windows' in ansible_distribution"

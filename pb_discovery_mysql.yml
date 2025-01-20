@@ -1,9 +1,9 @@
-- hosts: mysqlrhel8
+- hosts: all
   gather_facts: yes
   name: System Discovery
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
+  # remote_user: root #remove when running on SA Client
+  # become: true #remove when running on SA Client
+  # become_user: root #remove when running on SA Client
   vars:   
     needupdates: n
     psqlmode: 'HA-Standby'
@@ -11,6 +11,7 @@
     shellinfo: 'NA'
     routerinfowin: 'NA'
     shellinfowin: 'NA'
+    dir64: ""
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
@@ -378,6 +379,80 @@
 
       #Windows Host Script
 
+
+    - name: Search for mysql.exe in all accessible directories
+      win_find:
+        paths:
+          - 'C:\\Program Files'  # Search the entire C: drive
+          - 'C:\\Program Files (x86)'
+        patterns:
+          - 'mysql.exe'
+        recurse: yes  # Recursively search subdirectories
+        file_type: file  # Only search for files
+      register: mysql_search_result
+      when: "'Windows' in ansible_distribution"
+
+    - name: Check if MySQL was found
+      fail:
+        msg: "MySQL executable not found on the system!"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - mysql_search_result.matched == 0
+
+
+    - name: Display found MySQL paths
+      debug:
+        var: mysql_search_result.files
+      when: "'Windows' in ansible_distribution"
+
+    - name: Extract directory path of mysql.exe
+      set_fact:
+        mysql_path_chk: "{{ item.path | regex_replace('\\\\mysql.exe$', '') }}"
+      with_items: "{{ mysql_search_result.files }}"
+      when: 
+        - mysql_search_result.matched > 0
+        - "'Windows' in ansible_distribution"
+
+    - name: Display the MySQL installation directory
+      debug:
+        msg: "MySQL is installed in: {{ mysql_path_chk }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: get ver info
+      win_command: >
+        mysql --version
+      register: mysqlrawver
+      args:
+        chdir: "{{ mysql_path_chk }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+    
+    - name: Version check
+      debug:
+        var: mysqlrawver
+      when: "'Windows' in ansible_distribution"
+   
+    - name: set version
+      set_fact:
+        mysqlvercln: "{{ mysqlrawver.stdout | regex_search('Ver\\s([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+    - name: Clean Version check
+      debug:
+        var: mysqlvercln
+      when: "'Windows' in ansible_distribution"
+
+    - name: get minor
+      set_fact:
+        minorver: "{{ mysqlvercln[0][-2:] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+ 
+    - name: minor Version check
+      debug:
+        var: minorver
+      when: "'Windows' in ansible_distribution"
+     
     - name: Validate if WOW6432Node registry key exists (Windows)
       win_reg_stat:
         path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
@@ -396,17 +471,57 @@
       register: mysql_installation64
       when: 
         - "'Windows' in ansible_distribution"
-        - "not registry_check.exists"
+        - "not registry_check.exists and (minorver | int) >= 35"
 
+    - name: Check if MySQL Router exists
+      win_stat:
+        path: "C:\\Program Files\\MySQL\\MySQL Router 8.0\\bin\\mysqlrouter.exe"
+      register: mysqlrouter_stat
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: Display MySQL Router existence
+      debug:
+        var: mysqlrouter_stat.stat['exists']
+      when: 
+        - "'Windows' in ansible_distribution"
+    
+    - name: test
+      debug:
+        var: mysql_installation64
+      when: "'Windows' in ansible_distribution"
+
+    - name: set x64 fact
+      set_fact:
+        dir64: "{{ mysql_installation64.sub_keys[1] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - mysqlrouter_stat.stat['exists'] == true
+        - "not registry_check.exists and (minorver | int) >= 35" 
    
+
+    - name: set x64 fact
+      set_fact:
+        dir64: "{{ mysql_installation64.sub_keys[0] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - mysqlrouter_stat.stat['exists'] == false
+        - "not registry_check.exists and (minorver | int) >= 35"
+
+    - name: test
+      debug:
+        var: dir64
+      when: "'Windows' in ansible_distribution"
+
+    
     
     - name: Get MySQL installation base directory from registry down by 1 level (windows x64)
       win_reg_stat:
-        path: HKLM:\SOFTWARE\MySQL AB\{{ mysql_installation64.sub_keys[1] }}
+        path: HKLM:\SOFTWARE\MySQL AB\{{ dir64 }}
       register: mysql_installation_264
       when: 
         - "'Windows' in ansible_distribution"
-        - "not registry_check.exists"
+        - "not registry_check.exists and (minorver | int) >= 35"
 
     - name: Get MySQL installation base directory from registry (windows x86)
       win_reg_stat:
@@ -414,7 +529,7 @@
       register: mysql_installation86
       when: 
         - "'Windows' in ansible_distribution"
-        - "registry_check.exists"
+        - "registry_check.exists and (minorver | int) < 35"
     
     - name: Get MySQL installation base directory from registry down by 1 level (windows x86)
       win_reg_stat:
@@ -422,7 +537,7 @@
       register: mysql_installation_286
       when: 
         - "'Windows' in ansible_distribution"
-        - "registry_check.exists"
+        - "registry_check.exists and (minorver | int) < 35"
 
     - name: set path x64 (Windows)
       set_fact:
@@ -430,7 +545,7 @@
         mysql_installation_2: "{{ mysql_installation_264 }}"
       when: 
         - "'Windows' in ansible_distribution"
-        - "not registry_check.exists" 
+        - "not registry_check.exists and (minorver | int) >= 35" 
 
     - name: set path x86 (Windows)
       set_fact:
@@ -438,11 +553,15 @@
         mysql_installation_2: "{{ mysql_installation_286 }}"
       when: 
         - "'Windows' in ansible_distribution"
-        - "registry_check.exists"
+        - "registry_check.exists and (minorver | int) < 35"
 
     - name: test
       debug:
         var: mysql_installation_264
+      when: "'Windows' in ansible_distribution"
+    - name: test 2
+      debug:
+        var: mysql_installation_286
       when: "'Windows' in ansible_distribution"
 
     - name: Run wmic to get disk size and free space in bytes (Windows)
