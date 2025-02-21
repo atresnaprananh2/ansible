@@ -1,0 +1,312 @@
+- name: Update JSON collection using another collection with a specific key
+  hosts: winsqlserver3
+  vars:
+    instancelist: []
+    # Existing data collection
+    existing_data:
+      - id: 1
+        name: Object1
+        type: TypeA
+        value: 10
+      - id: 2
+        name: Object2
+        type: TypeB
+        value: 20
+
+    # Update data collection
+    update_data:
+      - id: 1
+        value: 15
+      - id: 3
+        name: Object3
+        type: TypeC
+        value: 30
+
+    update_data2:
+      - instance: 'MSSQL15.INSTANCE2'
+        binpath: 'test'
+      - instance: 'MSSQL15.MSSQLSERVER'
+        patchlevel: 'test2'
+
+  tasks:
+    - name: Get Cluster Node
+      win_shell: |
+        Get-ClusterNode
+      register: chkcluster
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
+      set_fact:
+        isCluster: "yes"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkcluster.failed == false
+
+    - name: Retrieve SQL Server instance names from the registry
+      win_shell: |
+        Get-Item -Path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL" |
+        Select-Object -ExpandProperty Property
+      register: sql_instances
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: Display the SQL Server instance names
+      debug:
+        msg: "SQL Server Instance Names: {{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        
+
+    - name: get instance name microsoft sql server 
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL'
+        state: present
+      register: registry_check
+      when: "'Windows' in ansible_distribution"
+
+    - debug:
+        msg: "{{ registry_check }}"
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: set instance
+      set_fact:
+        instancelist: "{{ instancelist + [registry_check.properties[ item ]['value']] }}"
+      loop: "{{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - debug:
+        msg: "{{ instancelist }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Create modified data by splitting and adding empty columns
+      set_fact:
+        convert_data: >
+          
+          {%- set data = [] -%}
+          {%- set counter = 1 -%}
+          {%- for item in instancelist -%}
+            {%- set parts = item.split('.') -%}
+            {%- set _ = data.append({'instance': parts[0] + '.' + parts[1], 'dbversion': '', 'patchlevel': '', 'productupdatelvl': '', 'binpath': '', 'index': counter}) -%}
+            {%- set counter = counter + 1 -%}
+          {%- endfor -%}
+          {{ data }}
+
+    - name: Debug modified data
+      debug:
+        var: convert_data
+
+    
+    - name: Convert to JSON object with server name as the key
+      set_fact:
+        sqlsrv_json_obj: >
+          {%- set data_dict = {} -%}
+          {%- for item in convert_data -%}
+            {%- set _ = data_dict.update({item['instance']: item}) -%}
+          {%- endfor -%}
+          {{ data_dict }}
+
+    - name: Convert to JSON string if needed
+      set_fact:
+        json_stringtest: "{{ sqlsrv_json_obj | to_json }}"
+
+    - name: Debug JSON string
+      debug:
+        var: json_stringtest
+
+    - name: Get middle two characters
+      set_fact:
+        mainver: "{{ instancelist[0][5:7] }}"  # Start at index 3 and take 2 characters
+    - name: Show patch level information
+      debug:
+        var: mainver
+
+    - name: Determine result based on conditions
+      set_fact:
+        sqlreleasever: >-
+          {% if mainver == "15" %}
+          MSSQL 2019
+          {% elif mainver == "16" %}
+          MSSQL 2022
+          {% elif mainver == "14" %}
+          MSSQL 2017
+          {% elif mainver == "13" %}
+          MSSQL 2016
+          {% elif mainver == "12" %}
+          MSSQL 2014
+          {% else %}
+          No conditions met
+          {% endif %}
+
+  
+    - name: Get Version 
+      win_shell: |
+         $instances = "{{ instancelist | join(',') }}" -split ","
+         $sqlmainver = "{{ sqlreleasever }}"
+         $result = ""
+         foreach ($instance in $instances) {
+            $paths = @(
+            "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instance\Setup"
+            )
+            foreach ($path in $paths) {
+              if (Test-Path $path) {
+                $productName = (Get-ItemProperty -Path $path).Edition
+                $productVersion = (Get-ItemProperty -Path $path).Version
+                $prodinfo = "${instance}: ${sqlmainver} ${productName}"
+                $result +=  "$prodinfo`n"
+                break
+              }
+            }  
+         }
+         Write-Output $result
+
+
+      register: productinfo
+    
+    - name: Show patch level information
+      debug:
+        var: productinfo
+
+    - name: Run PowerShell script to get updates
+      win_shell: |
+        # PowerShell script here
+        $instances = "{{ instancelist | join(',') }}" -split ","
+        $counter = 1  
+        $updates = @()
+
+        foreach ($instance in $instances) {
+            $registryPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instance\Setup"
+                            
+            $updateInfo = @{
+                
+                "instance_name" = $instance
+                "updated_instance" = @{
+                    "index" = $counter
+                    "binpath" = ""
+                    "dbversion" = ""
+                    "instance" = $instance
+                    "patchlevel" = ""
+                    "productupdatelvl" = ""
+                }
+            }
+
+            try {
+                $patchlevel = (Get-ItemProperty -Path $registryPath -Name Patchlevel).Patchlevel
+                $instdir = (Get-ItemProperty -Path $registryPath -Name SqlProgramDir).SqlProgramDir
+
+                $updateInfo.updated_instance.patchlevel = $patchlevel
+                $updateInfo.updated_instance.binpath = $instdir
+            } catch {
+                $updateInfo.updated_instance.patchlevel = "NA"
+                $updateInfo.updated_instance.binpath = "NA"
+            }
+
+            $updates += $updateInfo
+            $counter++  # Increment the counter
+        }
+
+        $updates | ConvertTo-Json -Depth 3 | Out-String
+      register: sql_updates
+
+    - name: Display the gathered SQL Server updates
+      debug:
+        var: sql_updates.stdout
+
+    - name: Update specific instance's column using loop
+      set_fact:
+        sqlsrv_json_obj: "{{ sqlsrv_json_obj | combine({ item.instance_name: item.updated_instance }) }}"
+      with_items: "{{ sql_updates.stdout }}"
+      loop_control:
+        loop_var: item
+
+    - name: Display updated SQL Server JSON
+      debug:
+        var: sqlsrv_json_obj
+
+    
+
+
+    - name: Create a temporary Python script file (Windows) for each instance
+      win_shell: |
+        $instance_name = "{{ item.key }}"
+        $instance_data = "{{ item.value }}"
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.interfaces[0].ipv4.address }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {
+                             'MSSQL_DBInstance_{{ item.value.index }}': '$instance_name' # Dynamic key with value
+                        }
+                        # Add instance specific data
+
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok for $instance_name")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        
+        # Define the file path dynamically based on instance name
+        $file_path = "C:\pushcustomattr_$instance_name.py"
+        
+        # Write the script to the file
+        $script | Out-File -FilePath $file_path -Encoding UTF8
+        
+      loop: "{{ sqlsrv_json_obj | dict2items }}"
+      when: "'Windows' in ansible_distribution"
+ 
+    - name: Execute the Python scripts (Windows)
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr_{{ item.key }}.py
+      register: result
+      when: "'Windows' in ansible_distribution"
+      loop: "{{ sqlsrv_json_obj | dict2items }}"
+
+    - name: Remove the temporary Python scripts (Windows)
+      win_file:
+        path: "C:\\pushcustomattr_{{ item.key }}.py"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+      loop: "{{ sqlsrv_json_obj | dict2items }}"
+
+
+
+    # - name: Initialize updated_data with existing_data
+    #   set_fact:
+    #     updated_data: "{{ existing_data }}"
+
+    # - name: Update or add entries based on the `id` column
+    #   set_fact:
+    #     updated_data: >-
+    #       {{
+    #         updated_data
+    #         | rejectattr('id', 'equalto', item.id) | list
+    #         + [
+    #           (
+    #             existing_data | selectattr('id', 'equalto', item.id) | combine(item, recursive=True)
+    #           )
+    #         ]
+    #       }}
+    #   loop: "{{ update_data }}"
+
+    # - name: Display the updated JSON collection
+    #   debug:
+    #     var: updated_data

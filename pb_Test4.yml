@@ -108,36 +108,49 @@
         instancelist: "{{ sql_instances.stdout_lines }}"
       when: 
         - "'Windows' in ansible_distribution"
-    
-    - name: Run the SQL Server patch installer silently
-      win_shell: >
-        {{ dest }}\\{{ patchname }} /quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck
-      args:
-        executable: cmd
-      ignore_errors: yes
-      register: install_status
 
-    - name: Check if reboot is required
+    - name: Start patching SQL Server instances asynchronously
+      async: 3600
+      poll: 0
+      loop: "{{ sql_instances.stdout_lines }}"
+      loop_control:
+        loop_var: instance
+      win_shell: |
+        {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename={{ instance }} /IAcceptSQLServerLicenseTerms
+      register: patch_jobs
+
+    - name: Wait for all patch tasks to complete
+      async_status:
+        jid: "{{ item.ansible_job_id }}"
+      loop: "{{ patch_jobs.results }}"
+      loop_control:
+        label: "{{ item.instance }}"
+      register: patch_results
+      until: patch_results.finished
+      retries: 60
+      delay: 360
+
+    - name: Reboot servers if patching required it
+      when: item.rc == 3010
+      loop: "{{ patch_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      win_reboot:
+
+
+
+    - name: Log final results for all instances
       debug:
         msg: >
-          Installation completed with return code {{ install_status.rc }}.
-          A reboot is {{ 'required' if install_status.rc == 3010 else 'not required' }}.
-
-    - name: Reboot if required
-      win_reboot:
-      when: install_status.rc == 3010
-
-    - name: Confirm reboot status
-      win_shell: "echo System reboot completed."
-      register: post_reboot_status
-      when: install_status.rc == 3010
-
-    - name: Delete directory and its contents
-      ansible.windows.win_file:
-        path: "{{ dest }}"
-        state: absent
-
+          "Instance {{ item.instance }} patch status: Return code {{ item.rc }}"
+      loop: "{{ patch_results.results }}"
+      loop_control:
+        label: "{{ item.instance }}"
+    
    
+
+
+    
     # - name: Run the SQL Server patch installer silently
     #   win_shell: >
     #     {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename={{ item }} /IAcceptSQLServerLicenseTerms

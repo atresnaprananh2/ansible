@@ -1,5 +1,4 @@
-- hosts: win2
- 
+- hosts: all
   gather_facts: yes
   name: Patch postgresql
   vars:

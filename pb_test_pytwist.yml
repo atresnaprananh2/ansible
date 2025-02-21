@@ -1,0 +1,95 @@
+- name: Create Python script and execute it on Windows
+  hosts: winsqlservercls1  # Target Windows hosts
+  gather_facts: no
+  tasks:
+    - name: Ensure C:\Temp directory exists
+      win_file:
+        path: C:\Temp
+        state: directory
+
+    - name: Create the Python script on C:\download_script.py
+      win_copy:
+        content: |
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
+
+          # Authenticate to the TwistServer
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "nh2123")
+
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef(300001)]
+
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 3600    # Timeout after 1 hr
+
+          userTag = "adHoc PowerShell script"
+
+          # PowerShell script to create and execute the Python script
+          source = '''@echo off
+          :: Create C:\Temp directory if it doesn't exist
+          if not exist C:\\Temp mkdir C:\\Temp
+
+          echo from coglib import downloader > C:\\download_script.py
+          echo downloader.Tsunami().fetch_unit( >> C:\\download_script.py
+          echo     downloader.DownloadUnit(6860001, None, None, 'sqlserver2019-kb5046365-x64.exe', None, r'C:\\Temp')) >> C:\\download_script.py
+          powershell -ExecutionPolicy Bypass -Command "python C:\\download_script.py"
+
+          :: Wait for the download to complete
+          timeout /t 10 /nobreak
+
+          :: Install the patch using PowerShell
+          powershell -ExecutionPolicy Bypass -Command Start-Process 'C:\\Temp\\sqlserver2019-kb5046365-x64.exe' -ArgumentList '/quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck' -Wait
+          powershell -ExecutionPolicy Bypass -Command Remove-Item 'C:\\download_script.py' -Force
+          powershell -ExecutionPolicy Bypass -Command Remove-Item 'C:\\Temp' -Recurse -Force
+
+          :: Reboot the system
+          shutdown /r /t 60 /f
+          '''
+
+          codeType = 'BAT'  # Running a batch script that invokes PowerShell
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 3600 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                  
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
+
+                  # Check if the job has finished
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
+
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+                  
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
+
+              # Timeout condition
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
+
+              time.sleep(10)  # Wait before checking again
+        dest: C:\download_script.py
+
+    # - name: Execute the Python script
+    #   win_shell: python C:\download_script.py
+    #   args:
+    #     executable: cmd

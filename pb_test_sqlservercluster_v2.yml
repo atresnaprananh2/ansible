@@ -1,0 +1,348 @@
+- name: Automate SQL Server Cluster Patching
+  hosts: winsqlservercls1
+  gather_facts: yes
+  vars:
+    - dest: C:\Temp
+    - dest2: C:\
+
+  tasks:
+
+    - name: Check if directory exists, if not create it
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: directory
+
+    - name: Display FreeSpace and Size in GB
+      debug:
+        var: ansible_facts.interfaces[1]["ipv4"][0]["address"]
+      when: "'Windows' in ansible_distribution"
+
+    - name: Create a temporary Python script file get custom attr
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.interfaces[1]['ipv4'][0]['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+        
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        "@
+        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getcustomattr.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\getcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattrwin: "{{ instattrwin.stdout }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Debug the active node output
+      debug:
+        var: instattrwin
+
+    - name:  Preparation - set variables
+      set_fact:
+        patchname: "{{ custattrwin.SQLServer_patchname }}"
+        patchid: "{{ custattrwin.SQLServer_patchid }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Download patch file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, r'{{ dest }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfile.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary download file using Python script
+      win_file:
+        path: C:\downloadfile.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    #method ssh
+    - name: Get active SQL Server node
+      win_shell: |
+        $cluster_group = Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Select-Object -ExpandProperty OwnerNode
+        $cluster_group | Where-Object { $_ -match "^[A-Za-z0-9]+" } | Select-Object -First 1
+      register: active_node
+
+    - name: Debug the active node output
+      debug:
+        var: active_node.stdout_lines
+
+    - name: Extract the node name from the PowerShell output
+      set_fact:
+        main_node: "{{ active_node.stdout_lines | select('match', '^[A-Za-z0-9]+.*Node$') | select('search', 'Up') | map('regex_replace', '^.*?([A-Za-z0-9]+).*$', '\\1') | first | default('No active node found') }}"
+
+    - name: Display active node name
+      debug:
+        msg: "The active node is {{ main_node }}"
+
+    - name: Failover SQL Server to passive node
+      win_shell: |
+        $active_node = "{{ main_node }}"
+        $cluster_nodes = Get-ClusterNode | Select-Object -ExpandProperty Name
+        $passive_node = $cluster_nodes | Where-Object {$_ -ne $active_node} | Select-Object -First 1
+        # Move the cluster group to the passive node
+        $test = Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Move-ClusterGroup -Node $passive_node
+        Write-Output $passive_node
+      register: passive_node
+
+    - name: Set passive Node
+      set_fact:
+        secondary_node: "{{ passive_node.stdout_lines[0] }}"
+
+    - name: Debug secondary node
+      debug:
+        msg: "secondary node: {{ passive_node }}"
+
+    - name: Create a temporary Python script file get secondary cluster device id
+      win_shell: |
+        $script = @"
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist.com.opsware.job import JobRef
+        import time
+        from pytwist import twistserver
+        from pytwist.com.opsware.script import ServerScriptJobArgs
+        from pytwist.com.opsware.server import ServerRef
+
+        # Authenticate with OTSA
+        ts = twistserver.TwistServer()
+        ts.authenticate("admin", "nh2123")  # Replace with actual OTSA credentials
+
+        server_service = ts.server.ServerService
+        # script_service = ts.script.ServerScriptService
+      
+
+        servers = server_service.findServerRefs(Filter())  # Fetch all servers
+        for srv in servers:
+            server_vo = server_service.getServerVO(srv)
+            hostname = server_vo.name
+            short_name = hostname.split('.')[0]
+            if short_name == "{{ secondary_node }}":
+              print(f"{server_vo.mid}")
+        "@
+        $script | Out-File -FilePath C:\getdeviceid.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getdeviceid.py
+      register: devidwin
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\getdeviceid.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - set device id attr
+      set_fact:
+        deviceid: "{{ devidwin.stdout_lines[0] }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Debug the active node output
+      debug:
+        var: deviceid
+
+    - name: Create the Python script for second node patching
+      win_copy:
+        content: |
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
+
+          # Authenticate to the TwistServer
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "nh2123")
+
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef({{ deviceid }})]
+
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 3600    # Timeout after 1 hr
+
+          userTag = "adHoc PowerShell script"
+
+          # PowerShell script to create and execute the Python script
+          source = '''@echo off
+          :: Create C:\Temp directory if it doesn't exist
+          if not exist C:\\Temp mkdir C:\\Temp
+
+          echo from coglib import downloader > C:\\download_script.py
+          echo downloader.Tsunami().fetch_unit( >> C:\\download_script.py
+          echo     downloader.DownloadUnit({{ patchid }}, None, None, '{{ patchname }}', None, r'C:\\Temp')) >> C:\\download_script.py
+          powershell -ExecutionPolicy Bypass -Command "python C:\\download_script.py"
+
+          :: Wait for the download to complete
+          timeout /t 10 /nobreak
+
+          :: Install the patch using PowerShell
+          powershell -ExecutionPolicy Bypass -Command Start-Process 'C:\\Temp\\{{ patchname }}' -ArgumentList '/quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck' -Wait
+          powershell -ExecutionPolicy Bypass -Command Remove-Item 'C:\\download_script.py' -Force
+          powershell -ExecutionPolicy Bypass -Command Remove-Item 'C:\\Temp\\{{ patchname }}' -Force
+
+          :: Reboot the system
+          shutdown /r /t 60 /f
+          '''
+
+          codeType = 'BAT'  # Running a batch script that invokes PowerShell
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 3600 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                  
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
+
+                  # Check if the job has finished
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
+
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+                  
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
+
+              # Timeout condition
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
+
+              time.sleep(10)  # Wait before checking again
+        dest: C:\install2ndnode.py
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\install2ndnode.py
+      args:
+        timeout: 3600
+      register: execres
+      ignore_errors: yes  # Continue playbook even if this task fails
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\install2ndnode.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - set result
+      set_fact:
+        instres2ndnode: "{{ execres.stdout }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Debug result
+      debug:
+        var: instres2ndnode
+
+
+    - name: Wait for {{ secondary_node }} to come back online
+      win_shell: |
+        $maxRetries = 40
+        $waitTime = 3600
+        for ($i = 0; $i -lt $maxRetries; $i++) {
+            $result = Test-NetConnection -ComputerName {{ secondary_node }} -Port 22
+            if ($result.TcpTestSucceeded) {
+                exit 0
+            }
+            Start-Sleep -Seconds $waitTime
+        }
+        exit 1  # Fail if server is not reachable after retries
+      register: wait_result
+      failed_when: wait_result.rc != 0  # Fail task if server never comes back up
+    
+    - name: check second node state
+      debug:
+        var: wait_result
+
+    - name: Failback to the original node
+      win_shell: |
+        $original_node = "{{ main_node }}"
+        Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Move-ClusterGroup -Node $original_node
+
+    - name: Run the SQL Server patch installer silently
+      win_shell: >
+        {{ dest }}\\{{ patchname }} /quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck
+      args:
+        executable: cmd
+      ignore_errors: yes
+      register: install_status
+
+    - name: Check if reboot is required
+      debug:
+        msg: >
+          Installation completed with return code {{ install_status.rc }}.
+          A reboot is {{ 'required' if install_status.rc == 3010 else 'not required' }}.
+
+    - name: Reboot if required
+      win_reboot:
+      when: install_status.rc == 3010
+
+    - name: Confirm reboot status
+      win_shell: "echo System reboot completed."
+      register: post_reboot_status
+      when: install_status.rc == 3010
+
+    - name: Delete directory and its contents
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: absent

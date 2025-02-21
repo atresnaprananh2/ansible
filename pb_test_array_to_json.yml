@@ -1,0 +1,125 @@
+- name: Create JSON object from an array with additional empty column
+  hosts: winsqlserver
+  gather_facts: true
+  vars:
+    instancelist: []
+    my_array:
+      - name: server1
+        ip: 192.168.1.1
+      - name: server2
+        ip: 192.168.1.2
+  tasks:
+    - name: Get Cluster Node
+      win_shell: |
+        Get-ClusterNode
+      register: chkcluster
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
+      set_fact:
+        isCluster: "yes"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkcluster.failed == false
+
+    - name: Retrieve SQL Server instance names from the registry
+      win_shell: |
+        Get-Item -Path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL" |
+        Select-Object -ExpandProperty Property
+      register: sql_instances
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: Display the SQL Server instance names
+      debug:
+        msg: "SQL Server Instance Names: {{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        
+
+    - name: get instance name microsoft sql server 
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL'
+        state: present
+      register: registry_check
+      when: "'Windows' in ansible_distribution"
+
+    - debug:
+        msg: "{{ registry_check }}"
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: set instance
+      set_fact:
+        instancelist: "{{ instancelist + [registry_check.properties[ item ]['value']] }}"
+      loop: "{{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - debug:
+        msg: "{{ instancelist }}"
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Create modified data by splitting and adding empty columns
+      set_fact:
+        convert_data: >
+          {%- set data = [] -%}
+          {%- for item in instancelist -%}
+            {%- set parts = item.split('.') -%}
+            {%- set _ = data.append({'instance': parts[0] + '.' + parts[1], 'dbversion': '', 'patchlevel': '', 'productupdatelvl': '', 'binpath': ''}) -%}
+          {%- endfor -%}
+          {{ data }}
+
+    - name: Debug modified data
+      debug:
+        var: convert_data
+    - name: Convert to JSON object with server name as the key
+      set_fact:
+        sqlsrv_json_obj: >
+          {%- set data_dict = {} -%}
+          {%- for item in convert_data -%}
+            {%- set _ = data_dict.update({item['instance']: item}) -%}
+          {%- endfor -%}
+          {{ data_dict }}
+
+    - name: Debug JSON object
+      debug:
+        var: sqlsrv_json_obj
+
+    - name: Convert to JSON string if needed
+      set_fact:
+        json_stringtest: "{{ sqlsrv_json_obj | to_json }}"
+
+    - name: Debug JSON string
+      debug:
+        var: json_stringtest
+
+
+    # - name: Add an empty column to each element in the array
+    #   set_fact:
+    #     modified_array: >-
+    #       {{
+    #         my_array | map('combine', {"status": ""}) | list
+    #       }}
+
+    # - name: Convert array to JSON object
+    #   set_fact:
+    #     json_object: >-
+    #       {{
+    #         dict(modified_array | map(attribute='name') | list |
+    #         zip(modified_array | list))
+    #       }}
+
+    # - name: Debug the JSON object
+    #   debug:
+    #     var: json_object
+
+    # - name: Convert to JSON string if needed
+    #   set_fact:
+    #     json_string: "{{ json_object | to_json }}"
+
+    # - name: Debug JSON string
+    #   debug:
+    #     var: json_string

@@ -1,0 +1,25 @@
+- name: Loop and set command output for multidimensional collection
+  hosts: oracle12
+  vars:
+    items:
+      - { name: "Object1", type: "TypeA" }
+      - { name: "Object2", type: "TypeB" }
+      - { name: "Object3", type: "TypeC" }
+  tasks:
+    - name: Run command for each item and store results
+      command: "echo {{ item.name }} of type {{ item.type }}"
+      register: command_output
+      loop: "{{ items }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Set fact with combined results
+      set_fact:
+        results: "{{ results | default({}) | combine({ item.name: { 'type': item.type, 'output': (command_output.results | selectattr('item.name', 'equalto', item.name) | map(attribute='stdout') | first) } }) }}"
+      loop: "{{ items }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display the collected results
+      debug:
+        var: results

@@ -1,5 +1,5 @@
 - name: Patch db2
-  hosts: all 
+  hosts: db2v11 
   gather_facts: yes
   name: System Discovery
   vars:   

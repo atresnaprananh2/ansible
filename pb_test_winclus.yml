@@ -1,0 +1,64 @@
+# - name: Detect and connect to all Windows cluster nodes
+#   hosts: winsqlservercls2
+#   gather_facts: no
+#   tasks:
+#     - name: Detect cluster nodes using PowerShell
+#       win_shell: |
+#         $nodes = Get-ClusterNode | Select-Object -Property Name, State
+#         $results = @()
+#         foreach ($node in $nodes) {
+#           $ip = [System.Net.Dns]::GetHostAddresses($node.Name) | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | Select-Object -First 1
+#           $results += [PSCustomObject]@{ Hostname = $node.Name; IP = $ip.IPAddressToString }
+#         }
+#         $results | ConvertTo-Json -Depth 10
+#       register: cluster_nodes
+
+#     - name: Parse cluster nodes into Ansible inventory
+#       set_fact:
+#         cluster_inventory: "{{ cluster_nodes.stdout | from_json }}"
+
+#     - name: Display detected nodes
+#       debug:
+#         msg: "Hostname: {{ item.Hostname }}, IP: {{ item.IP }}"
+#       with_items: "{{ cluster_inventory }}"
+
+#     - name: Perform tasks on detected nodes
+#       delegate_to: "{{ item.IP }}"
+#       win_shell: |
+#         echo "This is {{ item.Hostname }} (IP: {{ item.IP }})"
+#       with_items: "{{ cluster_inventory }}"
+
+- name: Detect and access Windows cluster nodes via seed node
+  hosts: winsqlservercls1
+  gather_facts: no
+  tasks:
+    - name: Detect cluster nodes using PowerShell
+      win_shell: |
+        $nodes = Get-ClusterNode | Select-Object -Property Name
+        $results = @()
+        foreach ($node in $nodes) {
+          $ip = [System.Net.Dns]::GetHostAddresses($node.Name) | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | Select-Object -First 1
+          $results += [PSCustomObject]@{ Hostname = $node.Name; IP = $ip.IPAddressToString }
+        }
+        $results | ConvertTo-Json -Depth 10
+      register: cluster_nodes
+
+    - name: Parse cluster nodes into a fact
+      set_fact:
+        cluster_inventory: "{{ cluster_nodes.stdout | from_json }}"
+
+    # - name: Generate SSH command for each cluster node
+    #   win_shell: |
+    #     ssh Administrator@{{ item.IP }} "echo Connected to {{ item.Hostname }} (IP: {{ item.IP }})"
+      
+    #   with_items: "{{ cluster_inventory }}"
+
+    - name: Perform task on all nodes via SSH
+      win_shell: |
+        ssh Administrator@172.19.11.32 "hostname && ipconfig"
+      register: chk
+   
+      # with_items: "{{ cluster_inventory }}"
+    - name: Display detected nodes
+      debug:
+        var: chk

@@ -1,93 +1,311 @@
-- name: Patch Clustered Microsoft SQL Server
+- name: Automate SQL Server Cluster Patching
   hosts: winsqlservercls1
+  gather_facts: yes
+  vars:
+    - dest: C:\Temp
+    - dest2: C:\
+
   tasks:
-    - name: Get all cluster nodes
-      win_shell: |
-        Get-ClusterNode | Select-Object -ExpandProperty Name
-      register: cluster_nodes
-
-    - name: Get SQL Server resource owner (active node)
-      win_shell: |
-        (Get-ClusterGroup -Name 'SQL Server (MSSQLSERVER)').OwnerNode
-      register: active_node
+  
+    - name: Check if directory exists, if not create it
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: directory
     
-    - name: Debug raw output of the command
+    - name: Display FreeSpace and Size in GB
       debug:
-        var: active_node.stdout
+        var: ansible_facts.interfaces[1]["ipv4"][0]["address"]
+      when: "'Windows' in ansible_distribution"
+    
 
-    - name: Extract the cluster node name safely
-      set_fact:
-        cluster_name: >-
-          {{
-            active_node.stdout.splitlines() | select('search', 'Up') | first | default('') | regex_replace('\\s+.*$', '')
-          }}
+    - name: Create a temporary Python script file get custom attr
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.interfaces[1]["ipv4"][0]["address"] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        "@
+        $script | Out-File -FilePath C:\getcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
 
-    - name: Extract only the cluster name 2
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getcustomattr.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\getcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - setcustattr
       set_fact:
-        active_node_cln: "{{ cluster_name.split()[0] }}"
+        custattrwin: "{{ instattrwin.stdout }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Debug the active node output
+      debug:
+        var: instattrwin
+
+    
+    - name:  Preparation - set variables
+      set_fact:
+        patchname: "{{ custattrwin.SQLServer_patchname }}"
+        patchid: "{{ custattrwin.SQLServer_patchid }}"
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Download patch file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, r'{{ dest }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfile.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary download file using Python script
+      win_file:
+        path: C:\downloadfile.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    
+    #method ssh
+    - name: Get active SQL Server node
+      win_shell: |
+          $cluster_group = Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Select-Object -ExpandProperty OwnerNode
+          $cluster_group | Where-Object { $_ -match "^[A-Za-z0-9]+" } | Select-Object -First 1
+      register: active_node
+
+    - name: Debug the active node output
+      debug:
+        var: active_node.stdout_lines
+
+    - name: Extract the node name from the PowerShell output
+      set_fact:
+        main_node: "{{ active_node.stdout_lines | select('match', '^[A-Za-z0-9]+.*Node$') | select('search', 'Up') | map('regex_replace', '^.*?([A-Za-z0-9]+).*$', '\\1') | first | default('No active node found') }}"
 
    
-    - name: Debug the extracted cluster name
+    - name: Display active node name
       debug:
-        msg: "The cluster node name is {{ active_node_cln }}"
+        msg: "The active node is {{ main_node }}"
+        
+    - name: Failover SQL Server to passive node
+      win_shell: |
+        $active_node = "{{ main_node }}"
+        $cluster_nodes = Get-ClusterNode | Select-Object -ExpandProperty Name
+        $passive_node = $cluster_nodes | Where-Object {$_ -ne $active_node} | Select-Object -First 1
+        # Move the cluster group to the passive node
+        $test = Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Move-ClusterGroup -Node $passive_node
+        Write-Output $passive_node
+      register: passive_node
 
-
-    - name: Set active and passive nodes
+    - name: Set passive Node
       set_fact:
-        active_node: "{{ active_node_cln }}"
-        passive_nodes: "{{ cluster_nodes.stdout_lines | difference([active_node_cln]) }}"
+        secondary_node: "{{ passive_node.stdout_lines[0] }}"
+    
+    - name: distribute patch file to secondary node
+      win_shell: |
+        scp {{ dest }}\\{{ patchname }} Administrator@{{ secondary_node }}:{{ dest2 }}\\{{ patchname }}
+      register: copy_result
+    
 
-    - name: Debug cluster information
+    - name: Debug secondary node
       debug:
-        msg:
-          - "Active Node: {{ active_node }}"
-          - "Passive Nodes: {{ passive_nodes }}"
+        msg: "secondary node: {{ passive_node }}"
+    
+    - name: Apply SQL Server patch to the passive node (now active)
+      win_shell: |
+         ssh Administrator@{{ secondary_node }} "powershell -ExecutionPolicy Bypass -Command Start-Process '{{ dest2 }}\\{{ patchname }}' -ArgumentList '/quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck' -Wait"
+      register: patch_result
 
-    # - name: test check active node
-    #   hosts: "{{ active_node }}"
-    #   tasks:
-    #     - name: Execute ipconfig command
-    #       win_command: ipconfig
-    #       register: ipconfig_output
+    - name: Display patch execution result
+      debug:
+        var: patch_result.stdout
 
-    #     - name: Display ipconfig output
-    #       debug:
-    #         var: ipconfig_output.stdout
-      
+    - name: Remove file on remote Windows host via SSH
+      win_shell: |
+        ssh Administrator@{{ secondary_node }} "del {{ dest2 }}{{ patchname }}"
 
-    # - name: Patch passive node
-    #   hosts: "{{ passive_nodes }}"
-    #   tasks:
-    #     - name: Download and install SQL Server patch
-    #       win_shell: |
-    #         # Replace with the actual SQL patching script
-    #         Start-Process -FilePath msiexec.exe -ArgumentList '/i SQLPatch.msi /quiet /norestart' -Wait
+    - name: Reboot {{ secondary_node }} via SSH
+      win_shell: |
+        ssh Administrator@{{ secondary_node }} "shutdown /r /t 0"
+      ignore_errors: yes  # Ignore SSH disconnect errors during reboot
 
-    #     - name: Reboot the node
-    #       win_reboot:
+    - name: Wait for {{ secondary_node }} to come back online
+      win_shell: |
+        $maxRetries = 40
+        $waitTime = 200
+        for ($i = 0; $i -lt $maxRetries; $i++) {
+            $result = Test-NetConnection -ComputerName {{ secondary_node }} -Port 22
+            if ($result.TcpTestSucceeded) {
+                exit 0
+            }
+            Start-Sleep -Seconds $waitTime
+        }
+        exit 1  # Fail if server is not reachable after retries
+      register: wait_result
+      failed_when: wait_result.rc != 0  # Fail task if server never comes back up
 
-    # - name: Failover SQL Server to patched node
-    #   hosts: "{{ passive_nodes | first }}"  # Failover to the first patched passive node
-    #   tasks:
-    #     - name: Move SQL Server resource group
-    #       win_shell: |
-    #         Move-ClusterGroup -Name 'SQL Server'
+    - name: Verify {{ secondary_node }} is up via SSH
+      win_shell: |
+        ssh Administrator@{{ secondary_node }} "hostname"
+      ignore_errors: yes
+      register: test
 
-    # - name: Patch remaining (active) node
-    #   hosts: "{{ active_node }}"
-    #   tasks:
-    #     - name: Download and install SQL Server patch
-    #       win_shell: |
-    #         # Replace with the actual SQL patching script
-    #         Start-Process -FilePath msiexec.exe -ArgumentList '/i SQLPatch.msi /quiet /norestart' -Wait
+    - name: Display hostname after reboot
+      debug:
+        msg: "The active node is {{ test.stdout }}"
 
-    #     - name: Reboot the node
-    #       win_reboot:
 
-    # - name: Validate SQL Server cluster state
-    #   hosts: all
-    #   tasks:
-    #     - name: Check SQL Server services
-    #       win_service:
-    #         name: MSSQLSERVER
-    #         state: started
+    - name: Failback to the original node
+      win_shell: |
+        $original_node = "{{ secondary_node }}"
+        Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Move-ClusterGroup -Node $original_node
+
+
+    - name: Run the SQL Server patch installer silently
+      win_shell: >
+        {{ dest }}\\{{ patchname }} /quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck
+      args:
+        executable: cmd
+      ignore_errors: yes
+      register: install_status
+
+    - name: Check if reboot is required
+      debug:
+        msg: >
+          Installation completed with return code {{ install_status.rc }}.
+          A reboot is {{ 'required' if install_status.rc == 3010 else 'not required' }}.
+
+    - name: Reboot if required
+      win_reboot:
+      when: install_status.rc == 3010
+
+    - name: Confirm reboot status
+      win_shell: "echo System reboot completed."
+      register: post_reboot_status
+      when: install_status.rc == 3010
+
+    - name: Delete directory and its contents
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: absent
+
+
+
+    
+    # - name: Validate SQL Server Version
+    #   win_shell: |
+    #     Invoke-Sqlcmd -Query "SELECT SERVERPROPERTY('ProductVersion')" -ServerInstance "localhost"
+    #   register: patched_version
+
+    # - debug:
+    #     msg: "SQL Server version after patching: {{ patched_version.stdout }}"
+
+
+    #method delegate  
+
+    # - name: Get active SQL Server node
+    #   win_shell: |
+    #     $cluster_group = Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Select-Object -ExpandProperty OwnerNode
+    #     $cluster_group | Where-Object { $_ -match "^[A-Za-z0-9]+" } | Select-Object -First 1
+    #   register: active_node
+
+    # - name: Debug the active node output
+    #   debug:
+    #     var: active_node.stdout_lines
+
+    # - name: Extract the node name from the PowerShell output
+    #   set_fact:
+    #     active_node_name: "{{ active_node.stdout_lines | select('match', '^[A-Za-z0-9]+.*Node$') | select('search', 'Up') | map('regex_replace', '^.*?([A-Za-z0-9]+).*$', '\\1') | first | default('No active node found') }}"
+
+
+    # - name: Display active node name
+    #   debug:
+    #     msg: "The active node is {{ active_node_name }}"
+
+  
+
+    # - name: Failover SQL Server to passive node
+    #   win_shell: |
+    #     $active_node = "{{ active_node_name }}"
+    #     $cluster_nodes = Get-ClusterNode | Select-Object -ExpandProperty Name
+    #     $passive_node = $cluster_nodes | Where-Object {$_ -ne $active_node} | Select-Object -First 1
+    #     Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Move-ClusterGroup -Node $passive_node
+    #   delegate_to: "{{ active_node_name }}"
+
+    # - name: Apply SQL Server patch to the passive node (now active)
+    #   win_package:
+    #     path: "{{ dest }}\\{{ patchname }}"
+    #     product_id: "{SQLSERVER_PATCH_GUID}"
+    #     state: present
+    #     arguments: "/quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck"  # Silent installation flags for SQL Server patch
+    #   register: patch_result
+    #   delegate_to: "{{ passive_node.stdout }}"
+
+
+    # - name: Reboot the node after patching
+    #   win_reboot:
+    #     reboot_timeout: 600
+    #     test_command: "hostname"
+    #   when: patch_result.changed
+    #   delegate_to: "{{ active_node.stdout }}"
+
+    # - name: Failback to the original node
+    #   win_shell: |
+    #     $original_node = "OriginalNodeName"
+    #     Get-ClusterGroup -Name "SQL Server (MSSQLSERVER)" | Move-ClusterGroup -Node $original_node
+    #   delegate_to: "{{ passive_node.stdout }}"
+
+    # - name: Apply SQL Server patch to the passive node (now active)
+    #   win_package:
+    #     path: "{{ dest }}\\{{ patchname }}"
+    #     product_id: "{SQLSERVER_PATCH_GUID}"
+    #     state: present
+    #     arguments: "/quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck"  # Silent installation flags for SQL Server patch
+    #   register: patch_result
+    #   delegate_to: "{{ passive_node.stdout }}"
+
+    # - name: Reboot the passive node after patching
+    #   win_reboot:
+    #     reboot_timeout: 600
+    #     test_command: "hostname"
+    #   when: patch_result.changed
+    #   delegate_to: "{{ passive_node.stdout }}"
+
+    # - name: Validate SQL Server Version
+    #   win_shell: |
+    #     Invoke-Sqlcmd -Query "SELECT SERVERPROPERTY('ProductVersion')" -ServerInstance "localhost"
+    #   register: patched_version

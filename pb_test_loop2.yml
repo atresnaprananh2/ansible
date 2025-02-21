@@ -1,0 +1,47 @@
+- name: Loop through each SQL Server instance, patch, and reboot
+  hosts: all
+  tasks:
+    - name: Initialize list of instances
+      set_fact:
+        remaining_instances:
+          - "SQLInstance1"
+          - "SQLInstance2"
+          - "SQLInstance3"
+
+    # Loop through each instance
+    - name: Patch and reboot each SQL Server instance
+      block:
+        # Run the patch installer silently for each instance
+        - name: Run SQL Server patch installer silently for instance {{ item }}
+          win_shell: >
+            {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename={{ item }} /IAcceptSQLServerLicenseTerms
+          args:
+            executable: cmd
+          ignore_errors: yes
+          register: patch_results
+          failed_when: patch_results.rc not in [0, 3010]
+          loop: "{{ remaining_instances }}"
+          loop_control:
+            loop_var: item
+
+        # Reboot the server after patching if needed
+        - name: Reboot the server after patching if required for instance {{ item }}
+          win_reboot:
+          when: patch_results.rc == 3010
+          loop: "{{ remaining_instances }}"
+          loop_control:
+            loop_var: item
+          when: patch_results.rc == 3010  # Ensure we only reboot if needed
+          
+    # Optionally, check for failed instances (those that did not return success or pending reboot)
+    - name: Identify failed instances
+      set_fact:
+        failed_instances: >-
+          {{ patch_results.results | selectattr('rc', '!=', 0) 
+                                    | selectattr('rc', '!=', 3010) 
+                                    | map(attribute='item') | list }}
+
+    - name: Debug failed instances
+      debug:
+        var: failed_instances
+      when: failed_instances | length > 0
