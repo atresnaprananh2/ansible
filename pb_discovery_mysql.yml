@@ -6,7 +6,6 @@
   # become_user: root #remove when running on SA Client
   vars:   
     needupdates: n
-    psqlmode: 'HA-Standby'
     routerinfo: 'NA'
     shellinfo: 'NA'
     routerinfowin: 'NA'
@@ -16,7 +15,6 @@
     - name: Gather system facts
       ansible.builtin.setup:
   
-
     - name: Display OS distribution and version (linux)
       debug:
         msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts['default_ipv4']['address'] }}"
@@ -28,10 +26,7 @@
       when: "'Windows' in ansible_distribution"
 
     #linux script
-    # - name: Gather installed package facts (linux)
-    #   ansible.builtin.package_facts:
-    #   when: "'Windows' not in ansible_distribution"
-
+  
     - name: Check MySQL installation
       shell: ". /etc/profile && which mysql"
       register: mysql_path

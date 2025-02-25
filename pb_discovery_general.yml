@@ -1,14 +1,15 @@
 - name: System DB Discovery
-  hosts: postgre 
+  hosts: postgrewindows 
   gather_facts: yes
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
+  # remote_user: root #remove when running on SA Client
+  # become: true #remove when running on SA Client
+  # become_user: root #remove when running on SA Client
   vars:   
     #change the patch information if needed
     - mysql_installation_2: {}
     - mysql_installation: {}
     - warningmsg: ""
+    - warningmsgwin: ""
     - chkdb2: ""
     - chkoracle: ""
     - chkpostgre: ""
@@ -25,6 +26,26 @@
     - mysql_version5: ""
     - mysql_version8: ""
     - mysql_version: ""
+    - needupdates: n
+    - routerinfo: 'NA'
+    - shellinfo: 'NA'
+    - routerinfowin: 'NA'
+    - shellinfowin: 'NA'
+    - dir64: ""
+    - chkmysqlwin: ""
+    - chkpostgrewin: ""
+    - chksqlserverwin: ""
+    - mysqlrouterstatstr: ""
+    - mysqlshellstatstr: ""
+    - registrychkstr: ""
+    - major_ver_win: "0"
+    - postgremodestr: ""
+    - isCluster: "NA"
+    - instancelist: []
+    - prodlevellist: []
+    - pathloglist: []
+    - getsqlnumberlist: []
+    - ipaddr: ""
   tasks:
    
 
@@ -888,7 +909,7 @@
         - "'RedHat' in ansible_distribution"
         - chkpostgre == false
     
-    #Linux MySQL Script
+    #linux script MySQL 
 
     - name: Check MySQL installation
       shell: ". /etc/profile && which mysql"
@@ -1209,6 +1230,891 @@
       when: 
         - "'RedHat' in ansible_distribution"
         - chkmysql == false
+
+    #windows script section
+    - name: Search for MySQL Server in installed programs
+      win_shell: |
+        Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
+        Select-Object DisplayName | Where-Object { $_.DisplayName -match "MySQL Server" }
+      register: chkmysqlwinobj
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
+
+    - name: Search for PostgreSQL in installed programs
+      win_shell: |
+        Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
+        Select-Object DisplayName | Where-Object { $_.DisplayName -match "PostgreSQL" }
+      register: chkpostgrewinobj
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
+
+    - name: Search for SQL Server in installed programs
+      win_shell: |
+        Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
+        Select-Object DisplayName | Where-Object { $_.DisplayName -match "SQL Server" }
+      register: chksqlserverwinobj
+      ignore_errors: yes
+      when: "'Windows' in ansible_distribution"
+
+    - name:  Preparation - set variables check mysql windows
+      set_fact:
+        chkmysqlwin: "{{ chkmysqlwinobj.stdout }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name:  Preparation - set variables check postgre windows
+      set_fact:
+        chkpostgrewin: "{{ chkpostgrewinobj.stdout }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name:  Preparation - set variables check sql server windows
+      set_fact:
+        chksqlserverwin: "{{ chksqlserverwinobj.stdout }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+
+
+    - name: set msg mysql windows
+      set_fact:
+        warningmsgwin: "{{ warningmsgwin }} mysql windows does not exist;"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin == ""
+
+    - name: set msg postgresql windows
+      set_fact:
+        warningmsgwin: "{{ warningmsgwin }} postgresql windows does not exist;"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin == ""
+
+    - name: set msg sql server windows
+      set_fact:
+        warningmsgwin: "{{ warningmsgwin }} sql server windows does not exist;"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chksqlserverwin == ""
+
+    - name: Push Warning windows
+      win_shell: |
+         $script = @"
+         import pytwist
+         from pytwist import * 
+         from pytwist.com.opsware.search import Filter
+         from pytwist import twistserver
+         from pytwist.com.opsware.server import ServerRef
+         import json
+         ts = pytwist.twistserver.TwistServer()
+         try:
+             server_service = ts.server.ServerService
+             filter = Filter()
+             server_refs = server_service.findServerRefs(filter)
+             for server_ref in server_refs:
+                 server_details = ts.server.ServerService.getServerVO(server_ref)
+                 if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                     try:
+                         server_details = ts.server.ServerService.getServerVO(server_ref)
+                         CAMap = {'Warning':'{{ warningmsgwin }}'}
+                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                         print("ok")
+                     except Exception as e:
+                         print(f"Error processing server {server_ref.getId()}: {e}")
+          
+         except Exception as e:
+             print(f"Failed to authenticate: {str(e)}")
+             exit(1)  
+         "@
+         $script | Out-File -FilePath C:\pushwarning.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+      
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushwarning.py
+      register: result
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the output
+      debug:
+        var: result.stdout
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\pushwarning.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+
+    #windows script mysql
+    - name: Search for mysql.exe in all accessible directories
+      win_find:
+        paths:
+          - 'C:\\Program Files'  # Search the entire C: drive
+          - 'C:\\Program Files (x86)'
+        patterns:
+          - 'mysql.exe'
+        recurse: yes  # Recursively search subdirectories
+        file_type: file  # Only search for files
+      register: mysql_search_result
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+
+    - name: Display found MySQL paths
+      debug:
+        var: mysql_search_result.files
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+
+    - name: Extract directory path of mysql.exe
+      set_fact:
+        mysql_path_chk: "{{ item.path | regex_replace('\\\\mysql.exe$', '') }}"
+      with_items: "{{ mysql_search_result.files }}"
+      when: 
+        - chkmysqlwin != ""
+        - mysql_search_result.matched > 0
+        - "'Windows' in ansible_distribution"
+
+    - name: Display the MySQL installation directory
+      debug:
+        msg: "MySQL is installed in: {{ mysql_path_chk }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: get ver info
+      win_command: >
+        mysql --version
+      register: mysqlrawver
+      args:
+        chdir: "{{ mysql_path_chk }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+    
+    - name: Version check
+      debug:
+        var: mysqlrawver
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+   
+    - name: set version
+      set_fact:
+        mysqlvercln: "{{ mysqlrawver.stdout | regex_search('Ver\\s([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Clean Version check
+      debug:
+        var: mysqlvercln
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: get minor
+      set_fact:
+        minorver: "{{ mysqlvercln[0][-2:] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+ 
+    - name: minor Version check
+      debug:
+        var: minorver
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+     
+    - name: Validate if WOW6432Node registry key exists (Windows)
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
+        state: present
+      register: registry_check
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+    - name: setregistrychk
+      set_fact:
+        registrychkstr: "{{ registry_check.exists }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Output registry check result (Windows)
+      debug:
+        var: registrychkstr
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Get MySQL installation base directory from registry (windows x64)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB
+      register: mysql_installation64
+      when: 
+        - chkmysqlwin != ""
+        - "'Windows' in ansible_distribution"
+        - "registrychkstr == false and (minorver | int) >= 35"
+    
+    - name: check x64 registry
+      debug:
+        var: mysql_installation64
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Check if MySQL Router exists
+      win_stat:
+        path: "C:\\Program Files\\MySQL\\MySQL Router 8.0\\bin\\mysqlrouter.exe"
+      register: mysqlrouter_stat
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Display MySQL Router existence
+      debug:
+        var: mysqlrouter_stat.stat['exists']
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+    
+
+ 
+
+    - name: set routerstatstr
+      set_fact:
+        mysqlrouterstatstr: "{{  mysqlrouter_stat.stat['exists'] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+        - "registrychkstr == false and (minorver | int) >= 35" 
+
+
+    - name: set x64 fact
+      set_fact:
+        dir64: "{{ mysql_installation64.sub_keys[1] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+        - mysqlrouterstatstr == true
+        - "registrychkstr == false and (minorver | int) >= 35" 
+   
+
+    - name: set x64 fact
+      set_fact:
+        dir64: "{{ mysql_installation64.sub_keys[0] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - mysqlrouterstatstr == false
+        - "registrychkstr == false and (minorver | int) >= 35"
+        - chkmysqlwin != ""
+
+   
+
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x64)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\MySQL AB\{{ dir64 }}
+      register: mysql_installation_264
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registrychkstr == false and (minorver | int) >= 35"
+        - chkmysqlwin != ""
+
+    - name: Get MySQL installation base directory from registry (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB
+      register: mysql_installation86
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registrychkstr == true and (minorver | int) < 35"
+        - chkmysqlwin != ""
+    
+    - name: Get MySQL installation base directory from registry down by 1 level (windows x86)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\WOW6432Node\MySQL AB\{{ mysql_installation86.sub_keys[0] }}
+      register: mysql_installation_286
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registrychkstr == true and (minorver | int) < 35"
+        - chkmysqlwin != ""
+
+    
+
+
+    - name: set path x64 (Windows)
+      set_fact:
+        mysql_installation: "{{ mysql_installation64 }}"
+        mysql_installation_2: "{{ mysql_installation_264 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registrychkstr == false and (minorver | int) >= 35" 
+        - chkmysqlwin != ""
+
+    - name: set path x86 (Windows)
+      set_fact:
+        mysql_installation: "{{ mysql_installation86 }}"
+        mysql_installation_2: "{{ mysql_installation_286 }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - "registrychkstr == true and (minorver | int) < 35"
+        - chkmysqlwin != ""
+
+   
+
+    - name: Run wmic to get disk size and free space in bytes (Windows)
+      win_shell: |
+        wmic logicaldisk where "DeviceID='C:'" get Size,FreeSpace /format:value   
+      register: disk_info
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Extract FreeSpace and Size values safely (Windows)
+      set_fact:
+        free_space_raw: "{{ disk_info.stdout | regex_search('FreeSpace=([0-9]+)', '\\1') }}"
+        size_raw: "{{ disk_info.stdout | regex_search('Size=([0-9]+)', '\\1') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Clean and convert FreeSpace and Size to integers (Windows)
+      set_fact:
+        free_space: "{{ free_space_raw | default('0') | regex_replace('\\D', '') | int }}"
+        size: "{{ size_raw | default('0') | regex_replace('\\D', '') | int }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Convert FreeSpace and Size to GB (Windows)
+      set_fact:
+        free_space_gb: "{{ free_space | float / 1024 / 1024 / 1024 | round(2) }}"
+        size_gb: "{{ size | float / 1024 / 1024 / 1024 | round(2) }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Display FreeSpace and Size in GB (Windows)
+      debug:
+        msg: "FreeSpace: {{ free_space_gb | float |round(2) }} GB, Size: {{ size_gb | float | round(2) }} GB"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    
+    
+   
+
+    - name: Set fact base dir (windows)
+      set_fact:
+        totalspace: "{{ size_gb | float | round(2) }}"
+        freespace: "{{ free_space_gb | float |round(2) }}"
+        binloc: "{{ mysql_installation_2.properties['Location']['value'][:-1]  }}"
+        dataloc: "{{ mysql_installation_2.properties['DataLocation']['value'] }}\\Data"
+        mysqlversion: "{{ mysql_installation_2.properties['Version']['value']  }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+    
+    
+    - name: Display Cleaned MySQL Data Directory (Windows)
+      debug:
+        msg: "MySQL Data Directory: {{ dataloc }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+  
+    - name: Execute MySQL command to get database size (Windows)
+      win_shell: |
+        # Define your MySQL data directory path
+        $datadir = "{{ dataloc }}"   # Replace with actual path to MySQL data directory
+
+        if (Test-Path $datadir) {
+            # Calculate the total size of all files (including hidden and system files) in all subdirectories
+            $totalSize = Get-ChildItem -Path $datadir -Recurse -Force | Where-Object { -not $_.PSIsContainer } | Measure-Object -Property Length -Sum
+
+            # Convert size to MB for readability
+            $sizeInMB = [math]::Round($totalSize.Sum / 1MB, 2)
+            Write-Output "$sizeInMB"
+        } else {
+            Write-Output "MySQL data directory not found at '$datadir'."
+        }
+      args:
+        chdir: "{{ binloc }}/bin" 
+      register: mysql_size_output
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+   
+    - name: Extract only the numeric value from the output (Windows)
+      set_fact:
+        mysql_database_size: "{{ mysql_size_output.stdout | regex_replace('\\r\\n', '') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Display the extracted MySQL database size (Windows)
+      debug:
+        msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != "" 
+   
+
+    - name: Get MySQL Port (Windows)
+      win_shell: |
+        # Get the PIDs of mysqld processes
+        $mysqlPIDs = Get-Process mysqld | Select-Object -ExpandProperty Id
+
+        # Get the listening ports associated with those PIDs
+        $mysqlPorts = netstat -ano | Select-String "LISTENING" | Select-String "\[::\]" | ForEach-Object {
+            $line = $_.ToString()
+            # Extract the PID from the line
+            if ($line -match "\s+(\d+)$") {
+                $currentPID = $matches[1]  # Renamed variable to avoid conflict
+                # Check if the PID is in the list of mysqld PIDs
+                if ($mysqlPIDs -contains $currentPID) {
+                    # Output the relevant information
+                    $line
+                }
+            }
+        }
+
+        # Output the ports being used by mysqld processes
+        $mysqlPorts
+      register: mysql_port
+      args:
+        chdir: "{{ binloc }}/bin" 
+      ignore_errors: yes
+      when: 
+        - "'Windows' in ansible_distribution" 
+        - chkmysqlwin != ""
+
+    
+    - name: Extract MySQL listening ports
+      set_fact:
+        mysql_port_clean: "{{ mysql_port.stdout_lines | map('regex_search', '\\[::\\]:(\\d+)') | list | select('search', '\\d+') }}"
+      when: 
+        - "'Windows' in ansible_distribution" 
+        - chkmysqlwin != ""
+
+    - name: Extract only port numbers from mysql_port_clean
+      set_fact:
+        mysql_ports: "{{ mysql_port_clean | map('regex_replace', '\\[::\\]:(\\d+)', '\\1') | list }}"
+      when: 
+        - "'Windows' in ansible_distribution" 
+        - chkmysqlwin != ""
+
+
+
+    - name: Extract MySQL Port (Windows)
+      set_fact:
+        mysql_port_number: "{{ mysql_ports | join(';') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+
+    - name: Check MySQL Primary Databases (Windows)
+      win_shell: |
+        $dataDir = "C:\ProgramData\MySQL\MySQL Server 8.0\data"
+
+        # Get the list of directories (databases) and filter out system databases and temporary databases
+        $primaryDatabases = Get-ChildItem -Path $dataDir -Directory | 
+            Where-Object { 
+                $_.Name -ne "mysql" -and 
+                $_.Name -ne "performance_schema" -and 
+                $_.Name -ne "sys" -and 
+                $_.Name -notmatch '^#' 
+            } | 
+            Select-Object Name
+
+        # Display the primary databases
+        $primaryDatabases
+      register: mysql_databases
+      ignore_errors: yes
+      args:
+        chdir: "{{ binloc }}/bin" 
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Filter out the actual database name (testdb)
+      set_fact:
+        retrieveddb: "{{ mysql_databases.stdout_lines | select('search', '^[a-zA-Z0-9]+$') | list }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+   
+    - name: Concatenate the values into one line (Windows)
+      set_fact:
+        dbconcat: "{{ retrieveddb | join(';') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+    
+    - name: get major version (Windows)
+      set_fact:
+        major_ver_win: "{{ mysqlversion[:1] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+      
+   
+    - name: Display MySQL Port (Windows)
+      debug:
+        msg: "MySQL Port: {{ mysql_port_number }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Display Primary Databases (Windows)
+      debug:
+        msg: "Primary Databases: {{ dbconcat }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: get router dir (windows)
+      win_shell: |
+        Get-ChildItem -Path "C:\Program Files\MySQL" -Recurse -Filter "mysqlrouter.exe" | Select-Object -ExpandProperty DirectoryName  
+      register: routerdir
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - chkmysqlwin != ""
+
+    - name: get shell dir (windows)
+      win_shell: |
+        Get-ChildItem -Path "C:\Program Files\MySQL" -Recurse -Filter "mysqlsh.exe" | Select-Object -ExpandProperty DirectoryName 
+      register: shelldir
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - chkmysqlwin != ""
+
+    - name: set router directory 
+      set_fact:
+        routerdirclean: "{{ routerdir.stdout_lines[0] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
+        - chkmysqlwin != ""
+
+    - name: set shell directory 
+      set_fact:
+        shelldirclean: "{{ shelldir.stdout_lines[0] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
+        - chkmysqlwin != ""
+
+
+    - name: get router info (windows)
+      win_command: >
+        mysqlrouter --version
+      register: routerverwin
+      args:
+        chdir: "{{ routerdirclean }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
+        - chkmysqlwin != ""
+
+    - name: get shell info (windows)
+      win_command: >
+        mysqlsh --version
+      register: shellverwin
+      args:
+        chdir: "{{ shelldirclean }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
+        - chkmysqlwin != ""
+
+    - name: set shell version 1 
+      set_fact:
+        shelldata: "{{ shellverwin.stdout | regex_replace('\\s*\\(.*$', '') | regex_replace('\\r\\n', '') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
+        - chkmysqlwin != ""
+
+    - name: set  router version 1 
+      set_fact:
+        routerdata: "{{ routerverwin.stdout | regex_replace('\\s*\\(.*$', '') |  regex_replace('\\r\\n', '') }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
+        - chkmysqlwin != ""
+
+    - name: set shell version 2
+      set_fact:
+        shellinfowin: "{{ shelldata |  regex_replace('\\n', '')}}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - shelldir.stdout != ""
+        - chkmysqlwin != ""
+
+    - name: set router version 2
+      set_fact:
+        routerinfowin: "{{ routerdata |  regex_replace('\\n', '')}}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - (major_ver_win | int) > 5
+        - routerdir.stdout != ""
+        - chkmysqlwin != ""
+        
+
+    
+    - name: Create a temporary Python script file (Windows)
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'MySQL_Router':'{{ routerinfowin }}', 'MySQL_Shell':'{{ shellinfowin }}','MySQL_Port':'{{ mysql_port_number }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+ 
+    - name: Execute the Python script (Windows)
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr.py
+      register: result
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Display the output (Windows)
+      debug:
+        var: result.stdout
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+
+    - name: Remove the temporary Python script (Windows)
+      win_file:
+        path: C:\pushcustomattr.py
+        state: absent
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
+    
+    #windows script postgresql
+    - name: Get PostgreSQL installation base directory from registry (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations
+      register: postgres_installations
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+    
+    - name: Get PostgreSQL installation services directory from registry (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Services
+      register: postgres_services
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Get Global PostgreSQL (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
+      register: postgresglobal
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+    
+    - name: Check Postgre Installed Ver (windows)
+      debug:
+        msg: "PostgreSQL {{ postgresglobal.properties['Version']['value'] }}"   
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Get the first installation ID (windows)
+      set_fact:
+        installation_id: "{{ postgres_installations.sub_keys[0] }}"
+        services_id: "{{ postgres_services.sub_keys[0] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Retrieve installation directory (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
+      register: postgres_installation_dir2
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Retrieve services directory (windows)
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\PostgreSQL\Services\{{ services_id }}
+      register: postgres_services_dir2
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Set fact base dir (windows)
+      set_fact:
+        basedir: "{{ postgres_installation_dir2.properties['Base Directory']['value'] }}"
+        datadir: "{{ postgres_installation_dir2.properties['Data Directory']['value'] }}"
+        installedver: "{{ postgresglobal.properties['Version']['value'] }}"
+        CompleteVer: "{{ postgres_installation_dir2.properties['CLT_Version']['value'] }}"
+        serviceid: "{{ postgres_installation_dir2.properties['Service ID']['value'] }}"
+        superuser: "{{ postgres_installation_dir2.properties['Super User']['value'] }}"
+        postgreport: "{{ postgres_services_dir2.properties['Port']['value'] }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+ 
+    - name: Check if recovery.signal file exists
+      win_stat:
+        path: "{{ datadir }}\\recovery.signal"  # Adjust this path as needed
+      register: postgremode
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+    
+    - name: Set fact base dir 2 (windows)
+      set_fact:
+        postgremodestr: "{{ postgremode.stat.exists }}"
+
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Display if recovery.signal exists
+      debug:
+        msg: "The recovery.signal file exists."
+      when: 
+        - "'Windows' in ansible_distribution"
+        - postgremodestr == true
+        - chkpostgrewin != ""
+
+    - name: Display if recovery.signal does not exist
+      debug:
+        msg: "The recovery.signal file does not exist."
+      when: 
+        - "'Windows' in ansible_distribution"
+        - postgremodestr == false
+        - chkpostgrewin != ""
+        
+
+    - name: Set mode (windows)
+      set_fact:
+        psqlmode: 'standalone'
+      when: 
+        - "'Windows' in ansible_distribution"
+        - postgremodestr == false 
+        - chkpostgrewin != ""
+
+    - name: Set fact port  (windows)
+      set_fact:
+        portpsql: "{{ postgreport }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Create a temporary Python script file
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'Postgresql_Version':'{{ CompleteVer }}', 'Postgresql_Datadir': '{{ datadir }}', 'Postgresql_Home':'{{ basedir }}','Postgresql_User': '{{ superuser }}', 'Postgresql_Port': '{{ portpsql }}', 'Postgresql_Mode': '{{ psqlmode }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr.py
+      register: result
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Display the output
+      debug:
+        var: result.stdout
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
+
+    - name: Remove the temporary Python script
+      win_file:
+        path: C:\pushcustomattr.py
+        state: absent
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkpostgrewin != ""
    
 
 
