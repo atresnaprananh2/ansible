@@ -1,0 +1,400 @@
+- hosts: mysqlrhel
+  gather_facts: yes
+  name: System Discovery
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
+  vars:   
+    needupdates: n
+    routerinfo: 'NA'
+    shellinfo: 'NA'
+    routerinfowin: 'NA'
+    shellinfowin: 'NA'
+    dir64: ""
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+  
+    - name: Display OS distribution and version (linux)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts['default_ipv4']['address'] }}"
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Display OS distribution and version (windows)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts.ip_addresses[1] }}"
+      when: "'Windows' in ansible_distribution"
+
+    #linux script
+  
+    - name: Check MySQL installation
+      shell: ". /etc/profile && which mysql"
+      register: mysql_path
+      ignore_errors: yes
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Resolve the real path of mysql  (linux)
+      command: readlink -f "{{ mysql_path.stdout }}"
+      register: mysql_path
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: mysql_path
+      when: "'RedHat' in ansible_distribution"
+
+    - name: get mysql service name
+      shell: systemctl list-units --type=service | grep mysql | cut -d '.' -f1
+      register: svcname
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: svcname
+      debug:
+        var: svcname
+      when: "'RedHat' in ansible_distribution"
+
+    - name: get datadir
+      shell: sudo grep -i 'datadir' /etc/my.cnf
+      register: mysqldatadir
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk2
+      debug:
+        var: mysqldatadir
+      when: "'RedHat' in ansible_distribution"
+     
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ mysql_path.stdout[:-5] }}"
+      
+      when: "'RedHat' in ansible_distribution"
+    
+   
+    
+    - name: Get Installed Version  (linux)
+      command: "{{ basedirlnx }}mysql --version"
+      register: mysqlversion
+      args:
+        chdir: "{{ basedirlnx }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk2
+      debug:
+        var: mysqlversion.stdout
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Extract MySQL version number
+      set_fact:
+        mysql_version5: "{{ mysqlversion.stdout | regex_search('Distrib ([0-9.]+)', '\\1') }}"
+        mysql_version8: "{{ mysqlversion.stdout | regex_search('Ver\\s([0-9]+\\.[0-9]+\\.[0-9]+)', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Extract MySQL version number 5
+      set_fact:
+        mysql_version: "{{ mysql_version5 }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_version5 | length != 0
+    
+    - name: Extract MySQL version number 8
+      set_fact:
+        mysql_version: "{{ mysql_version8 }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_version8 | length != 0
+
+    
+
+    - name: Show the MySQL version
+      debug:
+        msg: "MySQL version is {{ mysql_version }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Extract MySQL major version
+      set_fact:
+        major_ver: "{{ mysql_version[0][:1] }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Show the MySQL major version
+      debug:
+        msg: "MySQL version is {{ major_ver }}"
+      when: "'RedHat' in ansible_distribution"
+    
+
+
+    - name: Check if MySQL configuration file exists
+      stat:
+        path: /etc/my.cnf
+      register: mysql_conf_stat
+      when: "'RedHat' in ansible_distribution"
+
+   
+    - name: Read MySQL configuration file (if exists)
+      shell: "cat /etc/my.cnf | grep port"
+      register: mysql_port
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - mysql_conf_stat.stat.exists
+
+
+    - name: Debug MySQL port grep output
+      debug:
+        var: mysql_port.stdout_lines
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Clean spaces
+      set_fact:
+        mysqlportcln: "{{ mysql_port.stdout_lines | replace(' ', '') }}"
+      when: "'RedHat' in ansible_distribution"
+
+
+    - name: Set default MySQL port if not found
+      set_fact:
+        mysql_port_value: "{{ mysqlportcln | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Display MySQL port
+      debug:
+        msg: "MySQL is running on port {{ mysql_port_value }}"
+      when: "'RedHat' in ansible_distribution"
+
+    # - name: Create .my.cnf for MySQL root user with credentials
+    #   copy:
+    #     dest: /root/.my.cnf
+    #     content: |
+    #       [client]
+    #       user = root
+    #       password = P@ssw0rdnh2
+    #     owner: root
+    #     group: root
+    #     mode: '0600'
+    #   when: "'RedHat' in ansible_distribution"   
+
+    # - name: Ensure the .my.cnf file has correct permissions
+    #   file:
+    #     path: /root/.my.cnf
+    #     owner: root
+    #     group: root
+    #     mode: '0600'
+    #   when: "'RedHat' in ansible_distribution"
+        
+    # change to check physical data directory
+    - name: clean from spaces
+      set_fact:
+        datadirlnxcln: "{{ mysqldatadir.stdout | replace(' ', '')  }}"
+      when: "'RedHat' in ansible_distribution"  
+    - name: Set Fact discovery vars (linux)
+      set_fact:
+        datadirlnx: "{{ datadirlnxcln | regex_search('datadir=([\\/a-zA-Z0-9-_]+)', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"  
+
+    - name: Display MySQL datadirlinx
+      debug:
+        var: mysqldatadir
+      when: "'RedHat' in ansible_distribution" 
+
+    - name: get physical data dir content
+      shell: |
+        ./python3 - << 'EOF'
+        import os
+
+        # Path to the MySQL data directory
+        mysql_data_dir = '{{ datadirlnx[0] }}'
+
+        # List all subdirectories (databases)
+        databases = [name for name in os.listdir(mysql_data_dir) 
+                    if os.path.isdir(os.path.join(mysql_data_dir, name)) 
+                    and name not in ('mysql', 'performance_schema', 'information_schema', 'sys')]
+
+        print(databases)
+        EOF
+      register: mysql_databases
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"   
+    
+    # - name: Check MySQL Primary Databases
+    #   shell: |
+    #     {{ basedirlnx }}mysql -e "SHOW DATABASES;"
+    #   register: mysql_databases
+    #   ignore_errors: yes
+    #   when: "'RedHat' in ansible_distribution"
+      
+    # - name: Extract Primary Databases
+    #   set_fact:
+    #     primary_databases: "{{ mysql_databases.stdout_lines | difference(['information_schema', 'performance_schema', 'mysql', 'sys']) }}"
+    #   when: "'RedHat' in ansible_distribution"
+
+    - name: Extract Primary Databases
+      set_fact:
+        primary_databases: "{{ mysql_databases.stdout | replace(\"'\", '\"') | from_json }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Concatenate the values into one line
+      set_fact:
+        dbconcat: "{{ primary_databases | join(';') }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: check db  (linux)
+      debug:
+        var: dbconcat
+      when: "'RedHat' in ansible_distribution"
+
+      #check physical mysql installation directory
+    - name: get rootsize
+      shell: du -sm {{ datadirlnx[0] }}/*/ | awk '{sum += $1} END {print sum " MB"}'
+      register: mysql_database_size
+      when: "'RedHat' in ansible_distribution"
+
+    - name: get router info 
+      shell: ls -l | grep 'mysql-router'
+      register: mysql_router_version
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+    
+    
+    - name: Retrieve only the version string router
+      set_fact:
+        routerinfo: "{{ mysql_router_version.stdout | regex_search('mysql-router-[^ ]*') | replace('.tar.xz', '') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+        - mysql_router_version.failed == false
+
+    - name: get shell info 
+      shell: ls -l | grep 'mysql-shell'
+      register: mysql_shell_version
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+    
+    - name: Retrieve only the version string shell
+      set_fact:
+        shellinfo: "{{ mysql_shell_version.stdout | regex_search('mysql-shell-[^ ]*') | replace('.tar.gz', '') }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - (major_ver | int) > 5
+        - mysql_router_version.failed == false
+
+    # - name: Execute MySQL command to get database size
+    #   shell: |
+    #     {{ basedirlnx }}mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'Size (MB)' FROM information_schema.TABLES;"
+    #   register: mysql_size_output
+    #   when: "'RedHat' in ansible_distribution"
+    
+    # - name: Extract only the numeric value from the output
+    #   set_fact:
+    #     mysql_database_size: "{{ mysql_size_output.stdout_lines[1] }}"
+    #   when: "'RedHat' in ansible_distribution"
+
+    # - name: Display the extracted MySQL database size
+    #   debug:
+    #     msg: "Total size of MySQL databases: {{ mysql_database_size }} MB"
+    #   when: "'RedHat' in ansible_distribution"
+
+
+    - name: test3
+      debug:
+        var: routerinfo
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var: shellinfo
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var: mysql_port_value[0]
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: test4
+      debug:
+        var: dbconcat
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: test4
+      debug:
+        var: mysql_database_size.stdout 
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var: mysql_version[0]
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var:  datadirlnx[0]
+      when: "'RedHat' in ansible_distribution"
+    - name: test4
+      debug:
+        var:  basedirlnx
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'MySQL_Router':'{{ routerinfo }}', 'MySQL_Shell':'{{ shellinfo }}', 'MySQL_Port':'{{ mysql_port_value[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size.stdout }}', 'MySQL_Version':'{{ mysql_version[0] }}', 'MySQL_Datadir': '{{ datadirlnx[0] }}', 'MySQL_Home':'{{ basedirlnx }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output.stdout }}" 
+      when: "'RedHat' in ansible_distribution"
+
+      
+      
+    
+
+    
+
+    
+
+
+
+
+    
+   
+
+
+   
+
+
+    
+
+    
+
+      
+    
+
+    

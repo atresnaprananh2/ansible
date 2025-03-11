@@ -1,37 +1,12 @@
-- name: Manage Windows Cluster Nodes
-  hosts: winsqlservercls1
-  gather_facts: no
+- name: Check if a file exists in root directory
+  hosts: localhost
   tasks:
-    # Step 1: Get cluster nodes from the cluster virtual IP
-    - name: Retrieve cluster nodes
-      win_shell: |
-        Get-ClusterNode | Select-Object -ExpandProperty Name
-      register: cluster_nodes_output
+    - name: Check file existence
+      ansible.builtin.stat:
+        path: "/credentials.b64"
+      register: file_stat
 
-    # Step 2: Extract the node names as a list
-    - name: Parse cluster nodes
-      set_fact:
-        cluster_node_list: "{{ cluster_nodes_output.stdout_lines }}"
-
-    # Step 3: Display the detected nodes (for debugging)
-    - name: Display the list of cluster nodes
+    - name: Print file existence status
       debug:
-        msg: "Detected cluster nodes: {{ cluster_node_list }}"
-
-    # Step 4: Loop through the cluster nodes and execute tasks
-    - name: Perform actions on each cluster node
-      win_shell: |
-        echo "Performing tasks on node {{ item }}"
-      register: task_result
-      delegate_to: "{{ item }}"
-      loop: "{{ cluster_node_list }}"
-      loop_control:
-        loop_var: item
-
-    # Step 5: Display task results for each node
-    - name: Show task result for each node
-      debug:
-        msg: "Result from node {{ item }}: {{ task_result.stdout }}"
-      loop: "{{ cluster_node_list }}"
-      loop_control:
-        loop_var: item
+        msg: "File exists!" 
+      when: file_stat.stat.exists

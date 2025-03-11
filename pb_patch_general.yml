@@ -1248,9 +1248,8 @@
 
     - name: Search for SQL Server in installed programs
       win_shell: |
-        Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | 
-        Select-Object DisplayName | 
-        Where-Object { $_.DisplayName -match "^Microsoft SQL Server" -or $_.DisplayName -match "Microsoft SQL Server" }
+        Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
+        Select-Object DisplayName | Where-Object { $_.DisplayName -match "SQL Server" }
       register: chksqlserverwinobj
       ignore_errors: yes
       when: "'Windows' in ansible_distribution"
@@ -1272,21 +1271,6 @@
         chksqlserverwin: "{{ chksqlserverwinobj.stdout }}"
       when: 
         - "'Windows' in ansible_distribution"
-
-    - name: Display the output checking mysql
-      debug:
-        var: chkmysqlwin
-      when: "'Windows' in ansible_distribution"
-
-    - name: Display the output checking postgre
-      debug:
-        var: chkpostgrewin
-      when: "'Windows' in ansible_distribution"
-
-    - name: Display the output checking sqlsrv
-      debug:
-        var: chksqlserverwin
-      when: "'Windows' in ansible_distribution"
 
 
     - name: set msg mysql windows
@@ -1445,26 +1429,18 @@
       when: 
         - "'Windows' in ansible_distribution"
         - chkmysqlwin != ""
-
-    - name: Check registry for MySQL Server
-      ansible.builtin.win_shell: |
-        $mysqlKeyPath = "HKLM:\SOFTWARE\WOW6432Node\MySQL AB"
-        $exists = Get-ChildItem -Path $mysqlKeyPath -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like "MySQL Server*" }
-        if ($exists) { Write-Output "$true".ToLower() } else { Write-Output "$false".ToLower() }
-      register: registry_check_mysql
      
-    # - name: Validate if WOW6432Node registry key exists (Windows)
-    #   win_reg_stat:
-    #     path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
-    #     state: present
-    #   register: registry_check
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - chkmysqlwin != ""
-
+    - name: Validate if WOW6432Node registry key exists (Windows)
+      win_reg_stat:
+        path: 'HKLM:\SOFTWARE\WOW6432Node\MySQL AB\'
+        state: present
+      register: registry_check
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkmysqlwin != ""
     - name: setregistrychk
       set_fact:
-        registrychkstr: "{{ registry_check_mysql.stdout_lines[0] }}"
+        registrychkstr: "{{ registry_check.exists }}"
       when: 
         - "'Windows' in ansible_distribution"
         - chkmysqlwin != ""
@@ -1519,7 +1495,7 @@
         - "registrychkstr == false and (minorver | int) >= 35" 
 
 
-    - name: set x64 fact 1
+    - name: set x64 fact
       set_fact:
         dir64: "{{ mysql_installation64.sub_keys[1] }}"
       when: 
@@ -1529,7 +1505,7 @@
         - "registrychkstr == false and (minorver | int) >= 35" 
    
 
-    - name: set x64 fact 2
+    - name: set x64 fact
       set_fact:
         dir64: "{{ mysql_installation64.sub_keys[0] }}"
       when: 
@@ -2158,12 +2134,6 @@
         - "'Windows' in ansible_distribution"
         - chkclusterstr == false
         - chksqlserverwin != ""
-
-    - name: checkvalidation
-      debug:
-        var: chksqlserverwin
-      when: 
-        - "'Windows' in ansible_distribution"
     
     - name: SHOW CLUSTER
       debug:
