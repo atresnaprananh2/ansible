@@ -1,5 +1,5 @@
 - name: Get SQL Server version from Windows Registry
-  hosts: winsqlservercls1  # Replace with your actual Windows host group winsqlservercls1
+  hosts: trainingsqlserver  # Replace with your actual Windows host group winsqlservercls1
   gather_facts: yes
   vars:
     isCluster: "NA"

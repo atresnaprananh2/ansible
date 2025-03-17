@@ -1,31 +1,33 @@
-- hosts: oracle12 #change with all for SA
+- hosts: all #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
+ 
   vars:
-    - ansible_python_interpreter: /opt/opsware/agent/bin/./python3
-    - download_location: /opt/opsware/Patching/
-    - package_name: "p30463660_122010_Linux-x86-64.zip"
-    - package_id: "877610001"
+    - dest: C:\Temp
   tasks:
-    - name: Parameter validation
-      ansible.builtin.assert:
-        that:
-          - package_id is defined
-          - package_name is defined
-          - download_location is defined
+    
+    - name: Download patch file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
 
-    - name: run python to download from SA
-      command: "{{ ansible_python_interpreter }}"
-      args:
-        stdin: >
-          from coglib import downloader;
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit(6860001,None,None,'sqlserver2019-kb5046365-x64.exe', None, r'{{ dest }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
 
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{package_id}},None,None,'{{package_name}}', None, '{{download_location}}'))
-      register: test
-    - name: Output check result
-      debug:
-        var: test
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfile.py
+      register: instattrwin
+      when: "'Windows' in ansible_distribution"
 
+
+    - name: Remove the temporary download file using Python script
+      win_file:
+        path: C:\downloadfile.py
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+   

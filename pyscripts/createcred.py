@@ -37,6 +37,26 @@ try:
     result = subprocess.run(command, check=True, text=True, capture_output=True)
     print("Command executed successfully!")
     print("Output:", result.stdout)
+
+    filter2 = Filter()
+    filter2.expression = 'name = "cred.b64"'
+    
+    # Create a TwistServer object.
+    ts = twistserver.TwistServer()
+    
+    # Get a reference to ServerService.
+    packageService = ts.pkg.UnitService
+    
+    # Perform the search, returning a tuple of references.
+    packages = packageService.findUnitRefs(filter2)
+    
+    if len(packages) < 1:
+            print("No matching package found")
+            sys.exit(3)
+    
+    
+    for package in packages:
+        print(package.name + " - " + str(package.id))
 except subprocess.CalledProcessError as e:
     print("Error executing command:", e)
     print("Error Output:", e.stderr)
