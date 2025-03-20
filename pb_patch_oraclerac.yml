@@ -1,0 +1,83 @@
+- name: Patch Oracle 19c RAC on Red Hat
+  hosts: oracle_rac
+  become: yes
+  tasks:
+
+    - name: Ensure backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Stop database instances
+      shell: "srvctl stop database -d orcl"
+      become_user: oracle
+      ignore_errors: yes
+
+    - name: Stop cluster services (Only if GI patch is included)
+      shell: "crsctl stop cluster -all"
+      become_user: grid
+      ignore_errors: yes
+
+    - name: Backup Oracle Home
+      archive:
+        path: "{{ oracle_home }}"
+        dest: "{{ backup_dir }}/oracle_home_backup.tar.gz"
+        format: gz
+
+    - name: Backup Grid Home
+      archive:
+        path: "{{ grid_home }}"
+        dest: "{{ backup_dir }}/grid_home_backup.tar.gz"
+        format: gz
+      when: "'grid' in group_names"
+
+    - name: Copy Patch File to Target Nodes
+      copy:
+        src: "/path/to/{{ patch_file }}"
+        dest: "/tmp/{{ patch_file }}"
+        mode: '0644'
+
+    - name: Extract Patch
+      unarchive:
+        src: "/tmp/{{ patch_file }}"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - name: Check OPatch Version
+      command: "{{ oracle_home }}/OPatch/opatch version"
+      register: opatch_version
+      changed_when: false
+      become_user: oracle
+
+    - name: Apply Patch to Grid Infrastructure (if applicable)
+      shell: "{{ grid_home }}/OPatch/opatch apply -silent"
+      args:
+        chdir: "/tmp/{{ patch_id }}"
+      become_user: grid
+      when: "'grid' in group_names"
+
+    - name: Apply Patch to Oracle Home
+      shell: "{{ oracle_home }}/OPatch/opatch apply -silent"
+      args:
+        chdir: "/tmp/{{ patch_id }}"
+      become_user: oracle
+
+    - name: Start cluster services
+      shell: "crsctl start cluster"
+      become_user: grid
+      when: "'grid' in group_names"
+
+    - name: Start database instances
+      shell: "srvctl start database -d orcl"
+      become_user: oracle
+
+    - name: Verify Patch Application
+      command: "{{ oracle_home }}/OPatch/opatch lsinventory"
+      register: patch_status
+      changed_when: false
+      become_user: oracle
+
+    - name: Show Patch Status
+      debug:
+        msg: "{{ patch_status.stdout }}"

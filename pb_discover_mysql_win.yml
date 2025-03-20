@@ -12,7 +12,9 @@
   tasks:
     - name: Gather system facts
       ansible.builtin.setup:
-  
+    
+    - set_fact:
+        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
 
     - name: Display OS distribution and version (linux)
       debug:
@@ -249,7 +251,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ethernet0_ip }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {'MySQL_Port':'{{ mysql_port_number[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
@@ -277,11 +279,11 @@
         var: result.stdout
       when: "'Windows' in ansible_distribution"
 
-    - name: Remove the temporary Python script
-      win_file:
-        path: C:\pushcustomattr.py
-        state: absent
-      when: "'Windows' in ansible_distribution"
+    # - name: Remove the temporary Python script
+    #   win_file:
+    #     path: C:\pushcustomattr.py
+    #     state: absent
+    #   when: "'Windows' in ansible_distribution"
     
 
       

@@ -1,5 +1,5 @@
 - name: Get SQL Server version from Windows Registry
-  hosts: trainingsqlserver  # Replace with your actual Windows host group winsqlservercls1
+  hosts: winsqlservercls1  # Replace with your actual Windows host group winsqlservercls1
   gather_facts: yes
   vars:
     isCluster: "NA"
@@ -9,6 +9,7 @@
     getsqlnumberlist: []
     ipaddr: ""
   tasks:
+    
 
     - name: Get Cluster Node
       win_shell: |
@@ -28,20 +29,23 @@
       debug:
         var: isCluster
 
+    - set_fact:
+        ipaddr: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+      when: "'Windows' in ansible_distribution"
+
+    # - name:  Preparation - set ip unclustered
+    #   set_fact:
+    #     ipaddr: "{{ ansible_facts.interfaces[0].ipv4.address | trim }} "
+    #   when: 
+    #     - "'Windows' in ansible_distribution"
+    #     - chkcluster.failed == true
     
-    - name:  Preparation - set ip unclustered
-      set_fact:
-        ipaddr: "{{ ansible_facts.interfaces[0].ipv4.address | trim }} "
-      when: 
-        - "'Windows' in ansible_distribution"
-        - chkcluster.failed == true
-    
-    - name:  Preparation - set ip clustered
-      set_fact:
-        ipaddr: "{{ ansible_facts.interfaces[1]['ipv4'][0]['address']  | trim  }}"
-      when: 
-        - "'Windows' in ansible_distribution"
-        - chkcluster.failed == false
+    # - name:  Preparation - set ip clustered
+    #   set_fact:
+    #     ipaddr: "{{ ansible_facts.interfaces[1]['ipv4'][0]['address']  | trim  }}"
+    #   when: 
+    #     - "'Windows' in ansible_distribution"
+    #     - chkcluster.failed == false
 
     - name: Retrieve SQL Server instance names from the registry
       win_shell: |

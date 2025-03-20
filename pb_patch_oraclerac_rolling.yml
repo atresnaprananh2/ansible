@@ -1,0 +1,87 @@
+- name: Rolling Patch Oracle 19c RAC
+  hosts: oracle_rac
+  serial: 1  # Ensures only one node is patched at a time
+  become: yes
+  vars:
+    gi_patch_needed: true  # Set to false if GI patch is not required
+
+  tasks:
+
+    - name: Ensure backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Switch Database to Active Node
+      command: "srvctl relocate database -d {{ db_name }} -n {{ ansible_play_hosts | difference([inventory_hostname]) | first }}"
+      become_user: oracle
+      ignore_errors: yes
+      when: ansible_play_hosts.index(inventory_hostname) == 1
+
+    - name: Stop database instance on this node
+      shell: "srvctl stop instance -d {{ db_name }} -i {{ inventory_hostname }}"
+      become_user: oracle
+
+    - name: Stop cluster services (Only if GI patch is included)
+      shell: "crsctl stop crs"
+      become_user: grid
+      ignore_errors: yes
+      when: gi_patch_needed
+
+    - name: Backup Oracle Home
+      archive:
+        path: "{{ oracle_home }}"
+        dest: "{{ backup_dir }}/oracle_home_{{ inventory_hostname }}.tar.gz"
+        format: gz
+
+    - name: Backup Grid Home
+      archive:
+        path: "{{ grid_home }}"
+        dest: "{{ backup_dir }}/grid_home_{{ inventory_hostname }}.tar.gz"
+        format: gz
+      when: gi_patch_needed
+
+    - name: Copy Patch File to Target Node
+      copy:
+        src: "/path/to/{{ patch_file }}"
+        dest: "/tmp/{{ patch_file }}"
+        mode: '0644'
+
+    - name: Extract Patch
+      unarchive:
+        src: "/tmp/{{ patch_file }}"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - name: Apply Patch to Grid Infrastructure (if applicable)
+      shell: "{{ grid_home }}/OPatch/opatch apply -silent"
+      args:
+        chdir: "/tmp/{{ patch_id }}"
+      become_user: grid
+      when: gi_patch_needed
+
+    - name: Apply Patch to Oracle Home
+      shell: "{{ oracle_home }}/OPatch/opatch apply -silent"
+      args:
+        chdir: "/tmp/{{ patch_id }}"
+      become_user: oracle
+
+    - name: Start cluster services on this node
+      shell: "crsctl start crs"
+      become_user: grid
+      when: gi_patch_needed
+
+    - name: Start database instance on this node
+      shell: "srvctl start instance -d {{ db_name }} -i {{ inventory_hostname }}"
+      become_user: oracle
+
+    - name: Verify Patch Application
+      command: "{{ oracle_home }}/OPatch/opatch lsinventory"
+      register: patch_status
+      changed_when: false
+      become_user: oracle
+
+    - name: Show Patch Status
+      debug:
+        msg: "{{ patch_status.stdout }}"

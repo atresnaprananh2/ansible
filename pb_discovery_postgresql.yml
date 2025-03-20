@@ -180,6 +180,9 @@
     
 
     #Windows Host Script
+    - set_fact:
+        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Get PostgreSQL installation base directory from registry (windows)
       win_reg_stat:
@@ -289,7 +292,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ethernet0_ip }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {'Postgresql_Version':'{{ CompleteVer }}', 'Postgresql_Datadir': '{{ datadir }}', 'Postgresql_Home':'{{ basedir }}','Postgresql_User': '{{ superuser }}', 'Postgresql_Port': '{{ portpsql }}', 'Postgresql_Mode': '{{ psqlmode }}'}

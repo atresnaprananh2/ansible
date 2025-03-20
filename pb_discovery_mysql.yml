@@ -373,7 +373,7 @@
       when: "'RedHat' in ansible_distribution"
 
       #Windows Host Script
-
+  
 
     - name: Search for mysql.exe in all accessible directories
       win_find:
@@ -385,6 +385,10 @@
         recurse: yes  # Recursively search subdirectories
         file_type: file  # Only search for files
       register: mysql_search_result
+      when: "'Windows' in ansible_distribution"
+
+    - set_fact:
+        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
       when: "'Windows' in ansible_distribution"
 
     - name: Check if MySQL was found
@@ -903,7 +907,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ethernet0_ip }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {'MySQL_Router':'{{ routerinfowin }}', 'MySQL_Shell':'{{ shellinfowin }}','MySQL_Port':'{{ mysql_port_number }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}

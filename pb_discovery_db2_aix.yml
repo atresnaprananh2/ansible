@@ -1,9 +1,6 @@
-- hosts: db2svrAIX
+- hosts: all
   gather_facts: yes
   name: System Discovery
-  remote_user: root #remove when running on SA Client
-  become: true #remove when running on SA Client
-  become_user: root #remove when running on SA Client
   vars:   
     db2fixpack: 'NA'
   tasks:
@@ -146,7 +143,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'DB2_Rootspace':'{{ db2availspace }}', 'DB2_User':'{{ db2user }}', 'DB2_Version':'{{ db2ver }}', 'DB2_Specialbuilds':'{{ db2fixpack }}', 'DB2_Home':'{{ db2home }}', 'DB2_InstallationPath':'{{ db2path }}'}
+                        CAMap = {'DB2_Rootspace':'{{ db2availspace }} GB', 'DB2_User':'{{ db2user }}', 'DB2_Version':'{{ db2ver }}', 'DB2_Specialbuilds':'{{ db2fixpack }}', 'DB2_Home':'{{ db2home }}', 'DB2_InstallationPath':'{{ db2path }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

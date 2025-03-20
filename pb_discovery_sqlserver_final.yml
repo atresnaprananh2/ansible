@@ -8,6 +8,9 @@
     # sql_password: "Automation@123"  # Replace with a valid password
     # testpath: "C:\\Program Files\\Microsoft SQL Server\\MSSQL15.MSSQLSERVER\\MSSQL\\Log\\"
   tasks:
+    - set_fact:
+        ipaddr: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+      when: "'Windows' in ansible_distribution"
 
     - name: Get Cluster Node
       win_shell: |
@@ -251,7 +254,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ipaddr }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {'MSSQL_isClustered':'{{ isCluster }}', 'MSSQL_Space':'{{ free_space_gb | float |round(2) }} GB','MSSQL_TotalDB':'{{ sql_instances.stdout_lines | length }}', 'MSSQL_DBVersion':'{{ dbversion }}', 'MSSQL_PatchLevel':'{{ patchinfo }}', 'MSSQL_ProductUpdateLevel': '{{ productupdatelevel }}', 'MSSQL_DBInstance':'{{ sqlserverinstance }}', 'MSSQL_BinPath': '{{ sqlserverinstalldir }}'}

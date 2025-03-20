@@ -1,4 +1,4 @@
-- hosts: oracle12
+- hosts: oracleRAC1
   gather_facts: yes
   name: System Discovery
   remote_user: root
@@ -29,6 +29,11 @@
       shell: ps -ef | grep ora_pmon | grep -v grep
       register: pmon_output
       when: "'RedHat' in ansible_distribution"
+
+    - name: Get Oracle PMON processes complete
+      shell: ps -ef | grep pmon
+      register: pmon_output2
+      when: "'RedHat' in ansible_distribution"
     
     - name: Get Oracle User
       shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
@@ -50,7 +55,7 @@
         isclustered: 'yes'
       when: 
         - "'RedHat' in ansible_distribution"
-        - "'+ASM' in pmon_output.stdout"
+        - "'+ASM' in pmon_output2.stdout"
 
     
 

@@ -3,7 +3,7 @@
   name: Download a package from SA.
  
   vars:
-    - dest: C:\Temp
+    - dest: C:\\
   tasks:
     
     - name: Download patch file
@@ -11,7 +11,7 @@
         $script = @"
         from coglib import downloader;
 
-        downloader.Tsunami().fetch_unit(downloader.DownloadUnit(6860001,None,None,'sqlserver2019-kb5046365-x64.exe', None, r'{{ dest }}'))
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit(17170001,None,None,'mysql-installer-community-8.0.37.0.msi', None, r'{{ dest }}'))
         "@
         $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
       when: "'Windows' in ansible_distribution"
