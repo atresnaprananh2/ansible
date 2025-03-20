@@ -1230,6 +1230,10 @@
         - chkmysql == false
 
     #windows script section
+    - set_fact:
+        ipaddrwin: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+      when: 
+        - "'Windows' in ansible_distribution"
     - name: Search for MySQL Server in installed programs
       win_shell: |
         Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
@@ -1916,7 +1920,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ipaddrwin }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {'MySQL_Router':'{{ routerinfowin }}', 'MySQL_Shell':'{{ shellinfowin }}','MySQL_Port':'{{ mysql_port_number }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
@@ -1959,6 +1963,8 @@
         - chkmysqlwin != ""
     
     #windows script postgresql
+    
+       
     - name: Get PostgreSQL installation base directory from registry (windows)
       win_reg_stat:
         path: HKLM:\SOFTWARE\PostgreSQL\Installations
@@ -2092,7 +2098,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+                if server_details.primaryIP == "{{ ipaddrwin }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {'Postgresql_Version':'{{ CompleteVer }}', 'Postgresql_Datadir': '{{ datadir }}', 'Postgresql_Home':'{{ basedir }}','Postgresql_User': '{{ superuser }}', 'Postgresql_Port': '{{ portpsql }}', 'Postgresql_Mode': '{{ psqlmode }}'}
@@ -2463,7 +2469,7 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ipaddr | trim }}" :
+                if server_details.primaryIP == "{{ ipaddrwin | trim }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
                         CAMap = {
