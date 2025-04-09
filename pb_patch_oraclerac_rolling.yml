@@ -1,87 +1,194 @@
-- name: Rolling Patch Oracle 19c RAC
-  hosts: oracle_rac
-  serial: 1  # Ensures only one node is patched at a time
-  become: yes
+---
+- name: Rolling Patch for Oracle RAC Cluster (Auto-Discovery)
+  hosts: oracleRAC1
+  gather_facts: true
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
   vars:
-    gi_patch_needed: true  # Set to false if GI patch is not required
-
+    patch_dir: /tmp/oracle_patch
+    patch_number: 36582781
+    ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
   tasks:
 
-    - name: Ensure backup directory exists
-      file:
-        path: "{{ backup_dir }}"
-        state: directory
-        mode: '0755'
-
-    - name: Switch Database to Active Node
-      command: "srvctl relocate database -d {{ db_name }} -n {{ ansible_play_hosts | difference([inventory_hostname]) | first }}"
-      become_user: oracle
-      ignore_errors: yes
-      when: ansible_play_hosts.index(inventory_hostname) == 1
-
-    - name: Stop database instance on this node
-      shell: "srvctl stop instance -d {{ db_name }} -i {{ inventory_hostname }}"
-      become_user: oracle
-
-    - name: Stop cluster services (Only if GI patch is included)
-      shell: "crsctl stop crs"
-      become_user: grid
-      ignore_errors: yes
-      when: gi_patch_needed
-
-    - name: Backup Oracle Home
-      archive:
-        path: "{{ oracle_home }}"
-        dest: "{{ backup_dir }}/oracle_home_{{ inventory_hostname }}.tar.gz"
-        format: gz
-
-    - name: Backup Grid Home
-      archive:
-        path: "{{ grid_home }}"
-        dest: "{{ backup_dir }}/grid_home_{{ inventory_hostname }}.tar.gz"
-        format: gz
-      when: gi_patch_needed
-
-    - name: Copy Patch File to Target Node
-      copy:
-        src: "/path/to/{{ patch_file }}"
-        dest: "/tmp/{{ patch_file }}"
-        mode: '0644'
-
-    - name: Extract Patch
-      unarchive:
-        src: "/tmp/{{ patch_file }}"
-        dest: "/tmp/"
-        remote_src: yes
-
-    - name: Apply Patch to Grid Infrastructure (if applicable)
-      shell: "{{ grid_home }}/OPatch/opatch apply -silent"
+    - name: Find the path oracle home  (linux)
+      command: grep -E '^[^#]' /etc/oratab
+      register: oraclehomeinfo
       args:
-        chdir: "/tmp/{{ patch_id }}"
-      become_user: grid
-      when: gi_patch_needed
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
 
-    - name: Apply Patch to Oracle Home
-      shell: "{{ oracle_home }}/OPatch/opatch apply -silent"
+
+    - name: Find the path srvctl
+      command: su - oracle -c "which srvctl"
+      register: srvctlloc
       args:
-        chdir: "/tmp/{{ patch_id }}"
-      become_user: oracle
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Set fact oratab (linux)
+      set_fact:
+        oracle_home_path: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
+        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
+        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
+        srvctlpath: "{{ srvctlloc.stdout[:-11] }}"
+      when: "'RedHat' in ansible_distribution"
 
-    - name: Start cluster services on this node
-      shell: "crsctl start crs"
-      become_user: grid
-      when: gi_patch_needed
-
-    - name: Start database instance on this node
-      shell: "srvctl start instance -d {{ db_name }} -i {{ inventory_hostname }}"
-      become_user: oracle
-
-    - name: Verify Patch Application
-      command: "{{ oracle_home }}/OPatch/opatch lsinventory"
-      register: patch_status
-      changed_when: false
-      become_user: oracle
-
-    - name: Show Patch Status
+    - name: check latest version  (linux)
       debug:
-        msg: "{{ patch_status.stdout }}"
+        var: oracle_home_path
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Set fact oratab (linux)
+      set_fact:
+        opatch_cmd: "{{ oracle_home_path }}/OPatch/opatch"
+      when: "'RedHat' in ansible_distribution"
+
+
+    - name: Get the list of RAC nodes
+      shell: |
+         su - oracle -c "/dbi/oracle/V19Grid/bin/olsnodes -n -i | awk '{print \$1}'"
+      register: node_lists
+    
+    - name: Debug nodes detected
+      debug:
+        var: node_lists
+
+    - name: Parse the node list
+      set_fact:
+        rac_nodes: "{{ node_lists.stdout_lines }}"
+
+    - name: Debug nodes detected
+      debug:
+        msg: "Nodes detected: {{ rac_nodes }}"
+
+
+    - name: get secondary node
+      set_fact:
+        secondarynode: "{{ rac_nodes | reject('equalto', ansible_facts.hostname) | list }}"
+
+    - name: Show filtered list
+      debug:
+        var: secondarynode[0]
+    
+    - name: Get secondary node ID
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist import *
+          from pytwist.com.opsware.search import Filter
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
+
+          # Authenticate with OTSA
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "nh2123")  # Replace with actual OTSA credentials
+
+          server_service = ts.server.ServerService
+
+          # Fetch all servers
+          servers = server_service.findServerRefs(Filter())
+          for srv in servers:
+              server_vo = server_service.getServerVO(srv)
+              hostname = server_vo.name
+              short_name = hostname.split('.')[0]
+              if short_name == "{{ secondarynode[0] }}":
+                  print(f"{server_vo.mid}")
+
+      register: getsecondnodeid
+
+    - name:  Preparation - set device id attr
+      set_fact:
+        deviceid: "{{ getsecondnodeid.stdout_lines[0] }}"
+    
+    - name: Debug the active node output
+      debug:
+        var: deviceid
+    
+    
+
+    # - name: Get the list of RAC nodes
+    #   shell: |
+    #      su - oracle -c "export ORACLE_HOME={{ srvctlpath }} && export PATH=$ORACLE_HOME/bin:$PATH && srvctl config nodeapps -a | grep -oP '(?<=Hostname: ).*'"
+    #   register: node_list
+
+    # - name: Parse the node list
+    #   set_fact:
+    #     rac_nodes: "{{ node_lists.stdout_lines }}"
+
+    # - name: Debug nodes detected
+    #   debug:
+    #     msg: "Nodes detected: {{ rac_nodes }}"
+
+    - name: Patch each node sequentially
+      when: rac_nodes is defined and rac_nodes | length > 0
+      with_items: "{{ rac_nodes }}"
+      loop_control:
+        loop_var: rac_node
+      tasks:
+        - name: "===> STARTING PATCH PROCESS FOR NODE {{ rac_node }} <==="
+          debug:
+            msg: "Patching {{ rac_node }}"
+
+        - name: Ensure patch directory exists on {{ rac_node }}
+          file:
+            path: "{{ patch_dir }}"
+            state: directory
+            mode: 0755
+
+        - name: Copy patch file to {{ rac_node }}
+          copy:
+            src: ./p36582781_190000_Linux-x86-64.zip
+            dest: "{{ patch_dir }}/"
+            mode: 0644
+
+        - name: Unzip the patch file on {{ rac_node }}
+          ansible.builtin.unarchive:
+            src: "{{ patch_dir }}/p36582781_190000_Linux-x86-64.zip"
+            dest: "{{ patch_dir }}"
+            remote_src: yes
+
+        - name: Stop Oracle instance on {{ rac_node }}
+          shell: |
+            . {{ oracle_home }}/bin/oraenv <<< +ASM
+            srvctl stop instance -d orcl -i {{ rac_node }} -o immediate
+          ignore_errors: true
+
+        - name: Apply the patch to {{ rac_node }}
+          shell: |
+            . {{ oracle_home }}/bin/oraenv <<< +ASM
+            {{ opatch_cmd }} apply -silent -local {{ patch_dir }}/{{ patch_number }}
+          register: patch_result
+
+        - name: Validate patch success on {{ rac_node }}
+          fail:
+            msg: "Patching failed on {{ rac_node }}: {{ patch_result.stderr }}"
+          when: patch_result.rc != 0
+
+        - name: Start Oracle instance on {{ rac_node }}
+          shell: |
+            . {{ oracle_home }}/bin/oraenv <<< +ASM
+            srvctl start instance -d orcl -i {{ rac_node }}
+
+        - name: Verify patch applied on {{ rac_node }}
+          shell: |
+            . {{ oracle_home }}/bin/oraenv <<< +ASM
+            {{ opatch_cmd }} lsinventory | grep {{ patch_number }}
+          register: verify_patch
+
+        - name: Fail if patch not found on {{ rac_node }}
+          fail:
+            msg: "Patch {{ patch_number }} not found on {{ rac_node }}"
+          when: verify_patch.rc != 0
+
+        - name: Cleanup patch directory on {{ rac_node }}
+          file:
+            path: "{{ patch_dir }}"
+            state: absent
+
+        - name: "===> COMPLETED PATCHING FOR NODE {{ rac_node }} <==="
+          debug:
+            msg: "Patching completed successfully on {{ rac_node }}"

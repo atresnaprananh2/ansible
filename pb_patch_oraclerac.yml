@@ -1,13 +1,84 @@
 - name: Patch Oracle 19c RAC on Red Hat
   hosts: oracle_rac
   become: yes
+  gather_facts: true
+  vars: 
+    - backup_dir: /tmp/oraclebak
+    
   tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        minimum_required_opatch_version: "{{ custattr.oracle_minimum_required_opatch_version }}"
+        oracle_prep_patch_dir: "/opt/opsware/Patching/"
+        ansible_patches_dir: "/opt/opsware/Ansiblepatch/"
+        oracle_script_prep: "/opt/opsware/Ansiblepatch/"
+        opatch_latest_zip: "{{ custattr.opatchname }}"
+        opatch_latest_zip_id: "{{ custattr.opatchid }}"
+        pexpectinstaller: "pexpect-3.3.tar.gz"
+        pexpectinstaller_id: "7710001"
+        prepscripts: "requiredscripts.zip"
+        prepscripts_id: "7700001"
+        oneoff_latest_zip: "{{ custattr.patchname }}"
+        oneoff_latest_zip_id: "{{ custattr.patchid }}"
+        patchcode: "{{ custattr.patchcode }}"
+        oneoff_patch_dir: "{{ custattr.oracle_oneoffpatchdir }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 2
+      set_fact:
+        oneoff_patch_dir_int: '{{ oneoff_patch_dir | replace("p", "", 1) }}'
+        listener_file_path: '{{ oracle_script_prep }}/listenerOutput'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
+      when: "'RedHat' in ansible_distribution"
 
     - name: Ensure backup directory exists
       file:
         path: "{{ backup_dir }}"
         state: directory
         mode: '0755'
+
+   
 
     - name: Stop database instances
       shell: "srvctl stop database -d orcl"
