@@ -1,50 +1,89 @@
----
-- name: Rolling Patch for Oracle RAC Cluster (Auto-Discovery)
+- name: Automate SQL Server Cluster Patching
   hosts: oracleRAC1
   gather_facts: true
   remote_user: root #remove when running on SA Client
   become: true #remove when running on SA Client
   become_user: root #remove when running on SA Client
   vars:
-    patch_dir: /tmp/oracle_patch
-    patch_number: 36582781
-    ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+    - dest: C:\Temp
+    - dest2: C:\
   tasks:
 
-    - name: Find the path oracle home  (linux)
-      command: grep -E '^[^#]' /etc/oratab
-      register: oraclehomeinfo
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
       args:
-        chdir: '/var/lib'
-      when: "'RedHat' in ansible_distribution"
-
-
-    - name: Find the path srvctl
-      command: su - oracle -c "which srvctl"
-      register: srvctlloc
-      args:
-        chdir: '/var/lib'
+        chdir: '/opt/opsware/agent/bin'
       when: "'RedHat' in ansible_distribution"
     
-    - name: Set fact oratab (linux)
+    - name:  Preparation - setcustattr
       set_fact:
-        oracle_home_path: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
-        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
-        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
-        srvctlpath: "{{ srvctlloc.stdout[:-11] }}"
+        custattr: "{{ instattr.stdout }}"
       when: "'RedHat' in ansible_distribution"
 
-    - name: check latest version  (linux)
-      debug:
-        var: oracle_home_path
-      when: "'RedHat' in ansible_distribution"
-
-    - name: Set fact oratab (linux)
+    - name:  Preparation - set variables
       set_fact:
-        opatch_cmd: "{{ oracle_home_path }}/OPatch/opatch"
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        oracle_prep_patch_dir: "/opt/opsware/Patching/"
+        ansible_patches_dir: "/opt/opsware/Ansiblepatch/"
+        oracle_script_prep: "/opt/opsware/Ansiblepatch/"
+        opatch_latest_zip: "{{ custattr.opatchname }}"
+        opatch_latest_zip_id: "{{ custattr.opatchid }}"
+        pexpectinstaller: "pexpect-3.3.tar.gz"
+        pexpectinstaller_id: "7710001"
+        prepscripts: "requiredscripts.zip"
+        prepscripts_id: "7700001"
+        oneoff_latest_zip: "{{ custattr.patchname }}"
+        oneoff_latest_zip_id: "{{ custattr.patchid }}"
+        patchcode: "{{ custattr.patchcode }}"
+        oneoff_patch_dir: "{{ custattr.oracle_oneoffpatchdir }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Extract the number after 'p' and before '_'
+      set_fact:
+        patch_number: "{{ oneoff_latest_zip | regex_search('p(\\d+)_', '\\1') }}"
+
+
+    - name:  Preparation - set variables 2
+      set_fact:
+        oneoff_patch_dir_int: '{{ oneoff_patch_dir | replace("p", "", 1) }}'
+        listener_file_path: '{{ oracle_script_prep }}/listenerOutput'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
       when: "'RedHat' in ansible_distribution"
 
 
+   
+    
+
+    #method ssh
     - name: Get the list of RAC nodes
       shell: |
          su - oracle -c "/dbi/oracle/V19Grid/bin/olsnodes -n -i | awk '{print \$1}'"
@@ -70,125 +109,265 @@
     - name: Show filtered list
       debug:
         var: secondarynode[0]
-    
-    - name: Get secondary node ID
+
+
+    - name: Extract the node name from the PowerShell output
+      set_fact:
+        main_node: ansible_facts.hostname
+
+    - name: Get secondary node MIDs as JSON list
+      run_once: true
       shell: "{{ ansible_python_interpreter }} -"
       args:
         stdin: |
+          import json
           from pytwist import *
           from pytwist.com.opsware.search import Filter
+          from pytwist import twistserver
+
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "nh2123")
+
+          server_service = ts.server.ServerService
+          servers = server_service.findServerRefs(Filter())
+
+          secondary = {{ secondarynode | to_json }}
+          mids = []
+
+          for srv in servers:
+              server_vo = server_service.getServerVO(srv)
+              short_name = server_vo.name.split('.')[0]
+              if short_name in secondary:
+                  mids.append(server_vo.mid)
+
+          print(json.dumps(mids))
+      register: getsecondnodeid
+      changed_when: false
+
+
+
+
+    - name:  Preparation - set device id attr
+      set_fact:
+        deviceid: "{{ getsecondnodeid.stdout | from_json }}"
+    
+    - name: Debug the active node output
+      debug:
+        var: deviceid
+
+    - name: Print each device ID
+      debug:
+        msg: "Device ID: {{ item }}"
+      loop: "{{ deviceid }}"
+
+    - name: RAC Loop patching
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
           from pytwist.com.opsware.job import JobRef
           import time
           from pytwist import twistserver
           from pytwist.com.opsware.script import ServerScriptJobArgs
           from pytwist.com.opsware.server import ServerRef
 
-          # Authenticate with OTSA
+          # Authenticate to the TwistServer
           ts = twistserver.TwistServer()
-          ts.authenticate("admin", "nh2123")  # Replace with actual OTSA credentials
+          ts.authenticate("admin", "nh2123")
 
-          server_service = ts.server.ServerService
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef({{ item }})]
 
-          # Fetch all servers
-          servers = server_service.findServerRefs(Filter())
-          for srv in servers:
-              server_vo = server_service.getServerVO(srv)
-              hostname = server_vo.name
-              short_name = hostname.split('.')[0]
-              if short_name == "{{ secondarynode[0] }}":
-                  print(f"{server_vo.mid}")
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 3600    # Timeout after 1 hr
 
-      register: getsecondnodeid
+          userTag = "adHoc SHELL script"
 
-    - name:  Preparation - set device id attr
-      set_fact:
-        deviceid: "{{ getsecondnodeid.stdout_lines[0] }}"
+          # PowerShell script to create and execute the Python script
+          source = '''
+          # Step 1: Download the patch using embedded Python
+          cat > /tmp/otsadownload.py <<EOF
+          from coglib import downloader
+
+          downloader.Tsunami().fetch_unit(
+              downloader.DownloadUnit({{ oneoff_latest_zip_id }}, None, None, '{{ oneoff_latest_zip }}', None, '/opt/opsware')
+          )
+          EOF
+
+          /opt/opsware/agent/bin/python3 /tmp/otsadownload.py
+          rm -f /tmp/otsadownload.py
+
+          # Step 2: Extract the patch
+          cd /opt/opsware
+          unzip -o {{ oneoff_latest_zip }}
+
+          # Step 3: Switch to oracle user and perform the patching sequence
+          su - {{ oracle_user.stdout }} <<'EOORACLE'
+          # Stop listener
+          lsnrctl stop
+
+          # Shut down DB instance
+          sqlplus / as sysdba <<EOSQL
+          shutdown immediate;
+          exit;
+          EOSQL
+
+          # Apply the patch
+          cd /opt/opsware/{{ patch_number }}
+          $ORACLE_HOME/OPatch/opatch apply -silent
+
+
+
+          # Start DB instance
+          sqlplus / as sysdba <<EOSQL
+          startup;
+          exit;
+          EOSQL
+
+          # Start listener
+          lsnrctl start
+          EOORACLE
+
+          # Step 4: Clean up
+          rm -rf /opt/opsware/{{ oneoff_latest_zip }}
+          rm -rf /opt/opsware/{{ patch_number }}
+          '''
+
+          codeType = 'SH'  # Running a batch script that invokes PowerShell
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 3600 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                            
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
+
+                  # Check if the job has finished
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
+
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+                            
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
+
+              # Timeout condition
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
+
+              time.sleep(10)  # Wait before checking again
+      register: result
+      loop: "{{ deviceid }}"
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{oneoff_latest_zip_id}},None,None,'{{oneoff_latest_zip}}', None, '/opt/opsware'))
+      register: test
+      tags: download,remote
+
+    - name: "Step 26 --- Stop the named listeners"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;lsnrctl stop' 
+        # when: "oracle_binary_version | splitVersion == '12'"
+      tags:
+        - patching
+
+    - name: "Shutdown Oracle Database using SQL*Plus"
+      ansible.builtin.shell: |
+        sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba <<EOF
+        shutdown immediate;
+        exit
+        EOF'
+      args:
+        executable: /bin/bash
+      register: shutdown_output
+      tags:
+        - oracle_shutdown
+
+    # - name: "Step 28 --- Installing Quarterly Security Patch ({{ oneoff_patch_dir_int }})"
+    #   ansible.builtin.expect:
+    #     command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply' 
+    #     chdir: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_patch_dir_int }}/{{patchcode}}'
+    #     responses:
+    #       (?i)Email: ''
+    #       (?i)uninformed: 'Y'
+    #       (?i)proceed: 'y'
+    #       (?i)patching: 'y'
+    #     timeout: 1000
+    #   register: opatchOutput
+    #   tags:
+    #     - patching
+
+    - name: "Step 28 --- Installing Quarterly Security Patch ({{ oneoff_patch_dir_int }})"
+      ansible.builtin.command: >
+        sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; $ORACLE_HOME/OPatch/opatch apply -silent'
+      args:
+        chdir: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_patch_dir_int }}/{{ patchcode }}'
+      register: opatchOutput
+      tags:
+        - patching
+
+    - name: "Step 29 --- Verify all patches have been applied successfully"
+      ansible.builtin.expect:
+        command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+        chdir: '{{ oracle_home_path }}/OPatch'
+        responses:
+          (?i)proceed: 'y'
+      tags:
+        - patching
+
+    - name: "Step 30 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;lsnrctl start' 
+        #when: "oracle_binary_version | splitVersion == '12'"
+      tags:
+        - patching
+        
+    - name: "Start Oracle Database using SQL*Plus"
+      ansible.builtin.shell: |
+        sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba <<EOF
+        startup
+        exit
+        EOF'
+      args:
+        executable: /bin/bash
+      register: startoutput
+      tags:
+        - oracle_start
+
+    - name: "Remove patchfile"
+      ansible.builtin.file:
+        path: /opt/opsware/{{ oneoff_latest_zip }}
+        state: absent
+      tags:
+        - cleanup
+
+    - name: "Remove a directory and all its contents"
+      ansible.builtin.file:
+        path: /opt/opsware/{{ patch_number }}
+        state: absent
+      tags:
+        - cleanup
+
+        
+        
+
+
+
+
     
-    - name: Debug the active node output
-      debug:
-        var: deviceid
-    
-    
-
-    # - name: Get the list of RAC nodes
-    #   shell: |
-    #      su - oracle -c "export ORACLE_HOME={{ srvctlpath }} && export PATH=$ORACLE_HOME/bin:$PATH && srvctl config nodeapps -a | grep -oP '(?<=Hostname: ).*'"
-    #   register: node_list
-
-    # - name: Parse the node list
-    #   set_fact:
-    #     rac_nodes: "{{ node_lists.stdout_lines }}"
-
-    # - name: Debug nodes detected
-    #   debug:
-    #     msg: "Nodes detected: {{ rac_nodes }}"
-
-    - name: Patch each node sequentially
-      when: rac_nodes is defined and rac_nodes | length > 0
-      with_items: "{{ rac_nodes }}"
-      loop_control:
-        loop_var: rac_node
-      tasks:
-        - name: "===> STARTING PATCH PROCESS FOR NODE {{ rac_node }} <==="
-          debug:
-            msg: "Patching {{ rac_node }}"
-
-        - name: Ensure patch directory exists on {{ rac_node }}
-          file:
-            path: "{{ patch_dir }}"
-            state: directory
-            mode: 0755
-
-        - name: Copy patch file to {{ rac_node }}
-          copy:
-            src: ./p36582781_190000_Linux-x86-64.zip
-            dest: "{{ patch_dir }}/"
-            mode: 0644
-
-        - name: Unzip the patch file on {{ rac_node }}
-          ansible.builtin.unarchive:
-            src: "{{ patch_dir }}/p36582781_190000_Linux-x86-64.zip"
-            dest: "{{ patch_dir }}"
-            remote_src: yes
-
-        - name: Stop Oracle instance on {{ rac_node }}
-          shell: |
-            . {{ oracle_home }}/bin/oraenv <<< +ASM
-            srvctl stop instance -d orcl -i {{ rac_node }} -o immediate
-          ignore_errors: true
-
-        - name: Apply the patch to {{ rac_node }}
-          shell: |
-            . {{ oracle_home }}/bin/oraenv <<< +ASM
-            {{ opatch_cmd }} apply -silent -local {{ patch_dir }}/{{ patch_number }}
-          register: patch_result
-
-        - name: Validate patch success on {{ rac_node }}
-          fail:
-            msg: "Patching failed on {{ rac_node }}: {{ patch_result.stderr }}"
-          when: patch_result.rc != 0
-
-        - name: Start Oracle instance on {{ rac_node }}
-          shell: |
-            . {{ oracle_home }}/bin/oraenv <<< +ASM
-            srvctl start instance -d orcl -i {{ rac_node }}
-
-        - name: Verify patch applied on {{ rac_node }}
-          shell: |
-            . {{ oracle_home }}/bin/oraenv <<< +ASM
-            {{ opatch_cmd }} lsinventory | grep {{ patch_number }}
-          register: verify_patch
-
-        - name: Fail if patch not found on {{ rac_node }}
-          fail:
-            msg: "Patch {{ patch_number }} not found on {{ rac_node }}"
-          when: verify_patch.rc != 0
-
-        - name: Cleanup patch directory on {{ rac_node }}
-          file:
-            path: "{{ patch_dir }}"
-            state: absent
-
-        - name: "===> COMPLETED PATCHING FOR NODE {{ rac_node }} <==="
-          debug:
-            msg: "Patching completed successfully on {{ rac_node }}"
