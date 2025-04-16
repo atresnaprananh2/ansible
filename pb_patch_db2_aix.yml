@@ -101,7 +101,7 @@
       when: 
         - "'AIX' in ansible_distribution"  
         - version_component_2[0] != '12' 
-        - minor_version | int == 1
+        - minor_version[0] | int == 1
 
     - name:  Preparation - set patchdir
       set_fact:
@@ -140,14 +140,7 @@
       tags: download,remote
 
     
-    # - name: Extract DB2 other than 12
-    #   command: gunzip -c {{ db2_destdownload }}/{{ db2patchname }} | pax -r -s ',^/,,' -v
-    #   when: 
-    #     - "'AIX' in ansible_distribution"  
-    #     - version_component_2[0] != '12' 
-    #     - minor_version | int == 1
-    
-    - name: Extract DB2 12
+    - name: Extract DB2 not 12
       ansible.builtin.shell: |
         gunzip -c {{ db2_destdownload }}/{{ db2patchname }} | pax -r -s ',^/,,' -v
       args:
@@ -155,15 +148,8 @@
       when: 
         - "'AIX' in ansible_distribution"  
         - version_component_2[0] != '12' 
-        - minor_version | int == 1
+        - minor_version[0] | int == 1
     
-
-    # - name: Extract DB2 12
-    #   command: gunzip -c {{ db2_destdownload }}/{{ db2patchname }} | pax -r -s ',^/,,' -v
-    #   when: 
-    #     - "'AIX' in ansible_distribution"  
-    #     - version_component_2[0] == '12' or version_component_2[0] == '11' 
-    #     - minor_version[0] | int > 1 
     - name: Extract DB2 12
       ansible.builtin.shell: |
         gunzip -c {{ db2_destdownload }}/{{ db2patchname }} | pax -r -s ',^/,,' -v
@@ -200,7 +186,7 @@
       when: 
         - "'AIX' in ansible_distribution"  
         - version_component_2[0] != '12' 
-        - minor_version | int == 1
+        - minor_version[0] | int == 1
 
 
     - name: check status installation 

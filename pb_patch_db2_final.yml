@@ -4,8 +4,10 @@
   name: System Discovery
   vars:   
     #change the patch information if needed
-    - mysql_installation_2: {}
-    - mysql_installation: {}
+    - version_component_rhel: ""
+    - minor_ver_rhel: "0"
+    - version_component_aix: ""
+    - minor_ver_aix: "0"
   tasks:
     - name: Preparation - Get Software Policy Attr
       shell: |
@@ -60,29 +62,48 @@
     - name: Extract version component 2
       ansible.builtin.set_fact:
         version_component_2: "{{ db2version | regex_search('v(\\d+)\\.\\d+\\.\\d+\\.\\d+', '\\1') }}"
+        minor_version: "{{ db2version | regex_search('v\\d+\\.(\\d+)\\.\\d+\\.\\d+', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: set variable rhel
+      ansible.builtin.set_fact:
+        version_component_rhel: "{{ version_component_2[0] }}"
+        minor_ver_rhel: "{{ minor_version[0] }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Display the extracted minorver
+      ansible.builtin.debug:
+        msg: "The version component 2 is: {{ minor_version }}"
+      when: "'RedHat' in ansible_distribution"
+
 
     - name: Display the extracted version component 2
       ansible.builtin.debug:
         msg: "The version component 2 is: {{ version_component_2 }}"
+      when: "'RedHat' in ansible_distribution"
+
     
     - name: check status
       debug:
         var: db2installfixpackpath
       when: "'RedHat' in ansible_distribution"   
     
-    - name:  Preparation - set patchdir other than db2 12
+    - name:  Preparation - set patchdir using server t
       set_fact:
         db2patchdir11: "server_t"
       when: 
         - "'RedHat' in ansible_distribution"
-        - version_component_2[0] != '12'
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
-    - name:  Preparation - set patchdir
+
+    - name:  Preparation - set patchdir using server dec
       set_fact:
         db2patchdir12: "server_dec"
       when: 
         - "'RedHat' in ansible_distribution"
-        - version_component_2[0] == '12'
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1
     
     - name:  Preparation - set variables 2
       set_fact:
@@ -113,39 +134,23 @@
       tags: download,remote
 
     
-    - name: Extract DB2 other than 12
+    - name: Extract DB2 using server t
       command: tar -xvzf  {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
       when: 
         - "'RedHat' in ansible_distribution"   
-        - version_component_2[0] != '12'
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
 
-    - name: Extract DB2 12
+    - name: Extract DB2 using server dec
       command: tar -xvf {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
       when: 
         - "'RedHat' in ansible_distribution"  
-        - version_component_2[0] == '12' 
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1 
     
- 
-    # - name: install fixpack test  db2 12  
-    #   shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
-    #   args:
-    #     chdir: '/tmp/{{ db2patchdir12 }}'
-    #   register: logcheck
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"   
-    #     - version_component_2[0] == '12'
 
-    # - name: install fixpack test  other than ver 12 
-    #   shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
-    #   args:
-    #     chdir: '/tmp/{{ db2patchdir11 }}'
-    #   register: logcheck
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"   
-    #     - version_component_2[0] != '12'
-
-    - name: install fixpack db2 ver 12
+    - name: install fixpack db2 using server dec
       shell: >
         ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
         no
@@ -156,9 +161,10 @@
       ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"   
-        - version_component_2[0] == '12'
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1
 
-    - name: install fixpack db2 other ver
+    - name: install fixpack db2 using server t
       shell: >
         ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
         no
@@ -169,7 +175,8 @@
       ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"   
-        - version_component_2[0] != '12'
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
 
     - name: check status installation 
@@ -203,11 +210,266 @@
       ansible.builtin.file:
         path: "{{ db2_destdownload }}/{{ db2patchname }}"
         state: absent
+      when: "'RedHat' in ansible_distribution"   
+
 
     - name: Remove the directory server_dec
       ansible.builtin.file:
         path: "{{ db2_destdownload }}/server_dec"
         state: absent
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1   
+
+    - name: Remove the directory server_t
+      ansible.builtin.file:
+        path: "{{ db2_destdownload }}/server_t"
+        state: absent
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
+
+
+    #AIX script
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'AIX' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr_aix: "{{ instattr.stdout }}"
+      when: "'AIX' in ansible_distribution"
+
+    - name: Check db2 user
+      shell: "lsuser -a groups ALL | grep db2 | awk '{print $1}'"
+      register: db2user_aix
+      ignore_errors: yes
+      when: "'AIX' in ansible_distribution"
+
+    - name: set dbuser
+      set_fact:
+        dbuser_aix: "{{ db2user_aix.stdout_lines[0] }}"
+      when: "'AIX' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: db2user_aix
+      when: "'AIX' in ansible_distribution"
+    
+
+    - name:  Preparation - set variables 1
+      set_fact:
+        ansible_python_interpreter_aix: "/opt/opsware/agent/bin/python3"
+        db2patchname_aix: "{{ custattr.DB2_Patch_Name }}"
+        db2patchid_aix: "{{ custattr.DB2_Patch_Id }}"
+        db2home_aix: "{{ custattr.DB2_Home }}"
+        db2installationpath_aix: "{{ custattr.DB2_InstallationPath }}"
+        db2user_aix: "{{ custattr.DB2_User }}"
+        db2installfixpackpath_aix: "{{ custattr.DB2_InstallationPath[:-8] }}"
+        db2version_aix: "{{ custattr.DB2_Version }}"
+
+      when: "'AIX' in ansible_distribution"
+    
+    - name: Extract version component 2
+      ansible.builtin.set_fact:
+        version_component_2_aix: "{{ db2version | regex_search('v(\\d+)\\.\\d+\\.\\d+\\.\\d+', '\\1') }}"
+        minor_versions_aix: "{{ db2version | regex_search('v\\d+\\.(\\d+)\\.\\d+\\.\\d+', '\\1') }}"
+      when: "'AIX' in ansible_distribution"
+
+    - name: set variable rhel
+      ansible.builtin.set_fact:
+        version_component_aix: "{{ version_component_2_aix[0] }}"
+        minor_ver_aix: "{{ minor_versions_aix[0] }}"
+      when: "'AIX' in ansible_distribution"
+    
+
+    - name: Display the extracted version component 2
+      ansible.builtin.debug:
+        msg: "The version component 2 is: {{ version_component_2_aix }}"
+      when: "'AIX' in ansible_distribution"
+
+    - name: Display the extracted minorver
+      ansible.builtin.debug:
+        msg: "The version component 2 is: {{ minor_versions_aix }}"
+      when: "'AIX' in ansible_distribution"
+    
+    - name: check status
+      debug:
+        var: db2installfixpackpath_aix
+      when: "'AIX' in ansible_distribution"   
+    
+    - name:  Preparation - set patchdir using server T
+      set_fact:
+        db2patchdir11_aix: "server_t"
+      when: 
+        - "'AIX' in ansible_distribution"  
+        - version_component_aix != '12' 
+        - minor_ver_aix | int == 1
+
+    - name:  Preparation - set patchdir using server dec
+      set_fact:
+        db2patchdir12_aix: "server_dec"
+      when: 
+        - "'AIX' in ansible_distribution"  
+        - version_component_aix == '12' or version_component_aix == '11' 
+        - minor_ver_aix | int > 1
+    
+    - name:  Preparation - set variables 2
+      set_fact:
+        db2_destdownload_aix: "/tmp"
+      when: "'AIX' in ansible_distribution"
+
+
+    - name: stop db2 service
+      command: su - {{ dbuser_aix }} -c "db2stop"
+      register: db2stopchk_aix
+      when: 
+        - "'AIX' in ansible_distribution"   
+    
+    - name: check status db2stop
+      debug:
+        var: db2stopchk_aix.stdout
+      when: "'AIX' in ansible_distribution"   
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter_aix }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ db2patchid }},None,None,'{{ db2patchname }}', None, '{{ db2_destdownload }}'))
+      register: test
+      when: "'AIX' in ansible_distribution"   
+      tags: download,remote
+
+    
+    - name: Extract DB2 using server t
+      ansible.builtin.shell: |
+        gunzip -c {{ db2_destdownload_aix }}/{{ db2patchname_aix }} | pax -r -s ',^/,,' -v
+      args:
+        chdir: /tmp
+      when: 
+        - "'AIX' in ansible_distribution"  
+        - version_component_aix != '12' 
+        - minor_ver_aix | int == 1
+    
+    - name: Extract DB2 using server dec
+      ansible.builtin.shell: |
+        gunzip -c {{ db2_destdownload_aix }}/{{ db2patchname_aix }} | pax -r -s ',^/,,' -v
+      args:
+        chdir: /tmp
+      when: 
+        - "'AIX' in ansible_distribution"  
+        - version_component_aix == '12' or version_component_aix == '11' 
+        - minor_ver_aix | int > 1
+        
+    - name: install fixpack db2 using server dec
+      shell: >
+        ./installFixPack -b {{ db2installfixpackpath_aix }} -y <<EOF
+        no
+        EOF
+      args:
+        chdir: '/tmp/{{ db2patchdir12_aix }}'
+      register: logcheck
+      ignore_errors: yes
+      when: 
+        - "'AIX' in ansible_distribution"  
+        - version_component_aix == '12' or version_component_aix == '11' 
+        - minor_ver_aix | int > 1
+
+    - name: install fixpack db2 using server t
+      shell: >
+        ./installFixPack -b {{ db2installfixpackpath_aix }} -y <<EOF
+        no
+        EOF
+      args:
+        chdir: '/tmp/{{ db2patchdir11_aix }}'
+      register: logcheck_aix
+      ignore_errors: yes
+      when: 
+        - "'AIX' in ansible_distribution"  
+        - version_component_aix != '12' 
+        - minor_ver_aix | int == 1
+
+
+    - name: check status installation 
+      debug:
+        var: logcheck_aix.stdout
+      when: "'AIX' in ansible_distribution"   
+    
+    - name: db2 level check
+      command: su - {{ dbuser_aix }} -c "db2level"
+      register: dblevelchk_aix
+      when: 
+        - "'AIX' in ansible_distribution"   
+    
+    - name: check status dblevel
+      debug:
+        var: dblevelchk_aix.stdout
+      when: "'AIX' in ansible_distribution"   
+    
+    - name: start db2 service
+      command: su - {{ dbuser_aix }} -c "db2start"
+      register: db2startchk_aix
+      when: 
+        - "'AIX' in ansible_distribution"   
+
+    
+    - name: Remove the file patch
+      ansible.builtin.file:
+        path: "{{ db2_destdownload_aix }}/{{ db2patchname_aix }}"
+        state: absent
+      when: "'AIX' in ansible_distribution"   
+
+    - name: Remove the directory server_dec
+      ansible.builtin.file:
+        path: "{{ db2_destdownload }}/server_dec"
+        state: absent
+      when: 
+        - "'AIX' in ansible_distribution"
+        - version_component_aix == '12' or version_component_aix == '11' 
+        - minor_ver_aix | int > 1   
+
+    - name: Remove the directory server_t
+      ansible.builtin.file:
+        path: "{{ db2_destdownload }}/server_t"
+        state: absent
+      when: 
+        - "'AIX' in ansible_distribution"
+        - version_component_aix != '12'
+        - minor_ver_aix | int == 1
+
+
+     
 
 
    

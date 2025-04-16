@@ -1,11 +1,11 @@
 - name: Patch db2
-  hosts: db2v11 
+  hosts: all 
   gather_facts: yes
   name: System Discovery
   vars:   
     #change the patch information if needed
-    - mysql_installation_2: {}
-    - mysql_installation: {}
+    - version_component_rhel: ""
+    - minor_ver_rhel: "0"
   tasks:
     - name: Preparation - Get Software Policy Attr
       shell: |
@@ -60,29 +60,48 @@
     - name: Extract version component 2
       ansible.builtin.set_fact:
         version_component_2: "{{ db2version | regex_search('v(\\d+)\\.\\d+\\.\\d+\\.\\d+', '\\1') }}"
+        minor_version: "{{ db2version | regex_search('v\\d+\\.(\\d+)\\.\\d+\\.\\d+', '\\1') }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: set variable rhel
+      ansible.builtin.set_fact:
+        version_component_rhel: "{{ version_component_2[0] }}"
+        minor_ver_rhel: "{{ minor_version[0] }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Display the extracted minorver
+      ansible.builtin.debug:
+        msg: "The version component 2 is: {{ minor_version }}"
+      when: "'RedHat' in ansible_distribution"
+
 
     - name: Display the extracted version component 2
       ansible.builtin.debug:
         msg: "The version component 2 is: {{ version_component_2 }}"
+      when: "'RedHat' in ansible_distribution"
+
     
     - name: check status
       debug:
         var: db2installfixpackpath
       when: "'RedHat' in ansible_distribution"   
     
-    - name:  Preparation - set patchdir other than db2 12
+    - name:  Preparation - set patchdir using server t
       set_fact:
         db2patchdir11: "server_t"
       when: 
         - "'RedHat' in ansible_distribution"
-        - version_component_2[0] != '12'
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
-    - name:  Preparation - set patchdir
+
+    - name:  Preparation - set patchdir using server dec
       set_fact:
         db2patchdir12: "server_dec"
       when: 
         - "'RedHat' in ansible_distribution"
-        - version_component_2[0] == '12'
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1
     
     - name:  Preparation - set variables 2
       set_fact:
@@ -113,39 +132,23 @@
       tags: download,remote
 
     
-    - name: Extract DB2 other than 12
+    - name: Extract DB2 using server t
       command: tar -xvzf  {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
       when: 
         - "'RedHat' in ansible_distribution"   
-        - version_component_2[0] != '12'
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
 
-    - name: Extract DB2 12
+    - name: Extract DB2 using server dec
       command: tar -xvf {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
       when: 
         - "'RedHat' in ansible_distribution"  
-        - version_component_2[0] == '12' 
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1 
     
- 
-    # - name: install fixpack test  db2 12  
-    #   shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
-    #   args:
-    #     chdir: '/tmp/{{ db2patchdir12 }}'
-    #   register: logcheck
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"   
-    #     - version_component_2[0] == '12'
 
-    # - name: install fixpack test  other than ver 12 
-    #   shell: ./installFixPack -b {{ db2installfixpackpath }} -p /var/test_db2_patch -y
-    #   args:
-    #     chdir: '/tmp/{{ db2patchdir11 }}'
-    #   register: logcheck
-    #   when: 
-    #     - "'RedHat' in ansible_distribution"   
-    #     - version_component_2[0] != '12'
-
-    - name: install fixpack db2 ver 12
+    - name: install fixpack db2 using server dec
       shell: >
         ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
         no
@@ -156,9 +159,10 @@
       ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"   
-        - version_component_2[0] == '12'
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1
 
-    - name: install fixpack db2 other ver
+    - name: install fixpack db2 using server t
       shell: >
         ./installFixPack -b {{ db2installfixpackpath }} -y <<EOF
         no
@@ -169,7 +173,8 @@
       ignore_errors: yes
       when: 
         - "'RedHat' in ansible_distribution"   
-        - version_component_2[0] != '12'
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
 
     - name: check status installation 
@@ -203,11 +208,26 @@
       ansible.builtin.file:
         path: "{{ db2_destdownload }}/{{ db2patchname }}"
         state: absent
+      when: "'RedHat' in ansible_distribution"   
+
 
     - name: Remove the directory server_dec
       ansible.builtin.file:
         path: "{{ db2_destdownload }}/server_dec"
         state: absent
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - version_component_rhel == '12' or version_component_rhel == '11' 
+        - minor_ver_rhel | int > 1   
+
+    - name: Remove the directory server_t
+      ansible.builtin.file:
+        path: "{{ db2_destdownload }}/server_t"
+        state: absent
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - version_component_rhel != '12'
+        - minor_ver_rhel | int == 1
 
 
    
