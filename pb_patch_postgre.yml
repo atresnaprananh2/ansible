@@ -55,12 +55,7 @@
         ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
         postgrepatchname: "{{ custattr.postgresql_patchname }}"
         postgrepatchid: "{{ custattr.postgresql_patchid }}"
-        rhel7repoid: "7190001"
-        rhel7reponame: "rhel7.tar.gz"
-        rhel8repoid: "7210001"
-        rhel8reponame: "rhel8.tar.gz"
-        rhel9repoid: "7200001"
-        rhel9reponame: "rhel9.tar.gz"
+      
       when: "'RedHat' in ansible_distribution"
 
     - name:  Preparation - set variables 2
@@ -163,91 +158,10 @@
       when: "'RedHat' in ansible_distribution"   
       tags: download,remote
 
-
-    
     - name: Extract patch data
       command: tar -xzf /tmp/{{ postgrepatchname }} -C /tmp/
       when: "'RedHat' in ansible_distribution"
     
-    - name: repository check
-      command: sudo yum install make gcc readline-devel zlib-devel -y 
-      ignore_errors: true
-      register: chkrepo
-      when: "'RedHat' in ansible_distribution"
-
-    - name: create localrepo dir
-      command: sudo mkdir /var/local_repo/
-      when: "'RedHat' in ansible_distribution"
-
-    - name: Prerequisite --- download repo rhel {{ ansible_distribution_major_version }}
-      command: "{{ ansible_python_interpreter }}"
-      args:
-        stdin: >
-          from coglib import downloader;
-
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ rhel7repoid }},None,None,'{{ rhel7reponame }}', None, '{{ dest }}'))
-      register: test
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - chkrepo.failed == true
-        - ansible_distribution_major_version == "7"  
-
-    - name: Prerequisite --- download repo rhel {{ ansible_distribution_major_version }}
-      command: "{{ ansible_python_interpreter }}"
-      args:
-        stdin: >
-          from coglib import downloader;
-
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ rhel8repoid }},None,None,'{{ rhel8reponame }}', None, '{{ dest }}'))
-      register: test
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - chkrepo.failed == true
-        - ansible_distribution_major_version == "8"  
-
-    - name: Prerequisite --- download repo rhel {{ ansible_distribution_major_version }}
-      command: "{{ ansible_python_interpreter }}"
-      args:
-        stdin: >
-          from coglib import downloader;
-
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ rhel9repoid }},None,None,'{{ rhel9reponame }}', None, '{{ dest }}'))
-      register: test
-      when: 
-        - "'RedHat' in ansible_distribution"
-        - chkrepo.failed == true
-        - ansible_distribution_major_version == "9"  
-
-
-    - name: copy downloaded repofile
-      command: sudo mv {{ dest }}/rhel{{ ansible_distribution_major_version }}.tar.gz /var/local_repo/
-      when: "'RedHat' in ansible_distribution"
-    
-    - name: Extract repo 
-      command: sudo tar -xvzf rhel{{ ansible_distribution_major_version }}.tar.gz
-      args:
-        chdir: '/var/local_repo/'
-      when: "'RedHat' in ansible_distribution"
-
-    - name: Create the local YUM repository file
-      ansible.builtin.yum_repository:
-        name: "LocalRepo"
-        description: "Local RHEL {{ ansible_distribution_major_version }} Repository"
-        baseurl: "file:///var/local_repo/rhel{{ ansible_distribution_major_version }}/"
-        enabled: yes
-        gpgcheck: no
-      when: "'RedHat' in ansible_distribution"
-
-    - name: repolist yum
-      shell: yum repolist
-      args:
-        chdir: '{{ basedirlnx }}'
-      when: "'RedHat' in ansible_distribution"
-    
-    - name: install devel kit
-      command: sudo yum install make gcc readline-devel zlib-devel -y
-      when: "'RedHat' in ansible_distribution"
-
     - name: configure installer
       shell: ./configure --prefix={{ basedirpg }} --without-icu
       register: chk2
@@ -289,25 +203,6 @@
         chdir: '{{ basedirlnx }}'
       when: "'RedHat' in ansible_distribution"
     
-
-    # - name: remove local repo 1
-    #   shell: rm -rf /var/local_repo
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
-
-    # - name: remove local repo 2
-    #   shell: rm -rf /etc/yum.repos.d/LocalRepo.repo
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
-      
-    # - name: repolist yum
-    #   shell: yum repolist
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
-
     #Windows Host Script
     - name: Create a temporary Python script file get custom attr
       win_shell: |
@@ -361,7 +256,7 @@
       set_fact:
         postgrepatchnamewin: "{{ custattrwin.postgresql_patchname }}"
         postgrepatchidwin: "{{ custattrwin.postgresql_patchid }}"
-        userdir: "C:\\User\\Administrator\\"
+        userdir: "C:\\Users\\Administrator\\"
       when: "'Windows' in ansible_distribution"
     
     
@@ -374,6 +269,8 @@
         "@
         $script | Out-File -FilePath C:\downloadfile.py -Encoding UTF8
       when: "'Windows' in ansible_distribution"
+
+    
 
     - name: Execute the download file using Python script
       win_shell: |
@@ -444,7 +341,7 @@
     #     dest: C:\{{ installername }}
     #   when: "'Windows' in ansible_distribution"
 
-    - name: Install PostgreSQL 15 (windows)
+    - name: Install PostgreSQL (windows)
       win_command: >
         powershell -command "Start-Process -FilePath '{{ userdir }}{{ postgrepatchnamewin }}' -ArgumentList '--unattendedmodeui minimal --mode unattended --prefix "{{ basedir }}" --datadir "{{ datadir }}"' -Wait"
       register: install_output
