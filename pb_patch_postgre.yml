@@ -2,7 +2,6 @@
   gather_facts: yes
   name: Patch postgresql
   vars:
-    urlpatch: https://sbp.enterprisedb.com/getfile.jsp?fileid=1259127
     dest: /var/lib
     service_pattern: postgresql
   tasks:
@@ -256,7 +255,7 @@
       set_fact:
         postgrepatchnamewin: "{{ custattrwin.postgresql_patchname }}"
         postgrepatchidwin: "{{ custattrwin.postgresql_patchid }}"
-        userdir: "C:\\Users\\Administrator\\"
+        userdir: "C:/Users/Administrator/"
       when: "'Windows' in ansible_distribution"
     
     
@@ -335,11 +334,7 @@
         powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
       when: "'Windows' in ansible_distribution"
 
-    # - name: Download PostgreSQL installer (windows)
-    #   win_get_url:
-    #     url: "{{ urlpatch }}"
-    #     dest: C:\{{ installername }}
-    #   when: "'Windows' in ansible_distribution"
+    
 
     - name: Install PostgreSQL (windows)
       win_command: >
