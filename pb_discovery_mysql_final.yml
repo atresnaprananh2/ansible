@@ -349,7 +349,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'MySQL_Router':'{{ routerinfo }}', 'MySQL_Shell':'{{ shellinfo }}', 'MySQL_Port':'{{ mysql_port_value[0] }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size.stdout }}', 'MySQL_Version':'{{ mysql_version[0] }}', 'MySQL_Datadir': '{{ datadirlnx[0] }}', 'MySQL_Home':'{{ basedirlnx }}'}
+                        CAMap = {'mysql_router':'{{ routerinfo }}', 'mysql_shell':'{{ shellinfo }}', 'mysql_port':'{{ mysql_port_value[0] }}', 'mysql_primarydb':'{{ dbconcat }}', 'mysql_rootspace':'{{ mysql_database_size.stdout }}', 'mysql_version':'{{ mysql_version[0] }}', 'mysql_datadir': '{{ datadirlnx[0] }}', 'mysql_home':'{{ basedirlnx }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
@@ -383,9 +383,10 @@
         file_type: file  # Only search for files
       register: mysql_search_result
       when: "'Windows' in ansible_distribution"
+
     
     - set_fact:
-        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'search', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
       when: "'Windows' in ansible_distribution"
 
     - name: Check if MySQL was found
@@ -859,7 +860,7 @@
                 if server_details.primaryIP == "{{ ethernet0_ip }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'MySQL_Router':'{{ routerinfowin }}', 'MySQL_Shell':'{{ shellinfowin }}','MySQL_Port':'{{ mysql_port_number }}', 'MySQL_PrimaryDB':'{{ dbconcat }}', 'MySQL_RootSpace':'{{ mysql_database_size }} MB', 'MySQL_Version':'{{ mysqlversion }}', 'MySQL_Datadir': '{{ dataloc }}', 'MySQL_Home':'{{ binloc }}'}
+                        CAMap = {'mysql_router':'{{ routerinfowin }}', 'mysql_shell':'{{ shellinfowin }}','mysql_port':'{{ mysql_port_number }}', 'mysql_primarydb':'{{ dbconcat }}', 'mysql_rootspace':'{{ mysql_database_size }} MB', 'mysql_version':'{{ mysqlversion }}', 'mysql_datadir': '{{ dataloc }}', 'mysql_home':'{{ binloc }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

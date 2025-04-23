@@ -1,7 +1,6 @@
 - name: Patch MySQL RHEL
   hosts: all 
   gather_facts: yes
-  name: System Discovery
   vars:   
     #change the patch information if needed
     - mysql_installation_2: {}
@@ -46,14 +45,13 @@
     - name:  Preparation - set variables 1
       set_fact:
         ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
-        mysql_version: "{{ custattr.MySQL_destinationversion }}"
-        mysql_tarball: "{{ custattr.MySQL_patchname }}"
-        mysql_patchid: "{{ custattr.MySQL_patchid }}"
+        mysql_tarball: "{{ custattr.mysql_patchname }}"
+        mysql_patchid: "{{ custattr.mysql_patchid }}"
       when: "'RedHat' in ansible_distribution"
     
     - name:  Preparation - set variables 2
       set_fact:
-        mysql_destdownload: "/tmp/{{ mysql_tarball }}"
+        mysql_destdownload: "/opt/opsware/{{ mysql_tarball }}"
         mysqlfolder: "{{ mysql_tarball | regex_replace('\\.tar\\.xz$', '') }}"
       when: "'RedHat' in ansible_distribution"
 
@@ -132,7 +130,7 @@
         stdin: >
           from coglib import downloader;
 
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysql_patchid }},None,None,'{{ mysql_tarball }}', None, '/tmp'))
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysql_patchid }},None,None,'{{ mysql_tarball }}', None, '/opt/opsware'))
       register: test
       when: "'RedHat' in ansible_distribution"   
       tags: download,remote
@@ -142,7 +140,7 @@
     - name: Extract MySQL tar.gz
       unarchive:
         src: "{{ mysql_destdownload }}"
-        dest: "/opt/"
+        dest: "/opt/opsware"
         remote_src: yes
       when: "'RedHat' in ansible_distribution"   
 
@@ -153,7 +151,7 @@
         - mysql_install_dir is defined
 
     - name: Move new MySQL installation
-      command: "mv /opt/{{ mysqlfolder }} {{ mysql_install_dir }}"
+      command: "mv /opt/opsware/{{ mysqlfolder }} {{ mysql_install_dir }}"
       when: "'RedHat' in ansible_distribution"   
 
 
@@ -205,9 +203,6 @@
         state: started
       when: "'RedHat' in ansible_distribution"   
     
-    # - name: restart mysqld
-    #   command: "sudo systemctl restart mysqld"
-    #   register: statuschk
 
     - name: chkstatus
       command: "sudo systemctl status mysqld"
@@ -218,6 +213,13 @@
       debug:
         var: statuschk
       when: "'RedHat' in ansible_distribution"   
+
+    - name: Remove the file patch
+      ansible.builtin.file:
+        path: "{{ mysql_destdownload }}"
+        state: absent
+      when: "'RedHat' in ansible_distribution"   
+
     
     #windows script
     - name: Create a temporary Python script file get custom attr
@@ -270,10 +272,10 @@
     
     - name:  Preparation - set variables
       set_fact:
-        patchname: "{{ custattrwin.MySQL_Patchname }}"
-        mysqlpatchid: "{{ custattrwin.MySQL_Patchid }}"
-        productid: "{{ custattrwin.MySQL_productid }}"
-        userdir: "{{ custattrwin.MySQL_userdir }}"
+        patchname: "{{ custattrwin.mysql_patchname }}"
+        mysqlpatchid: "{{ custattrwin.mysql_patchid }}"
+        # productid: "{{ custattrwin.MySQL_productid }}"
+        userdir: C:\Program Files\Opsware
       when: "'Windows' in ansible_distribution"
 
 
@@ -537,42 +539,6 @@
         - (major_ver_win | int) == 5
         - vcredist2013cln == '0'
     
-    
-
-    # - name: Create my.cnf with UTF-8 encoding without BOM using PowerShell #change with the DB credentials that you have set up
-    #   ansible.builtin.win_shell: |
-    #     $content = @"
-    #     [client]
-    #     user=root
-    #     password=Welcome123..
-    #     "@
-    #     $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
-    #     [System.IO.File]::WriteAllLines("{{ userdir }}.my.cnf", $content, $utf8NoBomEncoding)
-    #   when: "'Windows' in ansible_distribution"
-
-   
-    # - name: Backup MySQL databases with mysqldump using defaults file
-    #   ansible.builtin.win_shell: |
-    #     .\mysqldump --defaults-file="{{ userdir }}.my.cnf" --all-databases > {{ userdir }}alldatabases_backup.sql
-    #   args:
-    #     chdir: "{{ binloc }}/bin" 
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Find MySQL services using sc query
-    #   ansible.builtin.win_shell: |
-    #     Get-Service | Where-Object {$_.DisplayName -like "*MySQL*"} | Select-Object DisplayName, Name, Status | Select-String -Pattern 'Name' | ForEach-Object { $_.Line.Split(' ')[1] }
-    #   register: mysql_services
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: Extract the actual name from the string
-    #   set_fact:
-    #     service_name: "{{ mysql_services.stdout.split('=')[1].split(';')[0] }}"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Display the extracted service name
-    #   debug:
-    #     msg: "The service name is: {{ service_name }}"
-    #   when: "'Windows' in ansible_distribution"
 
     - name: Download patch file
       win_shell: |
@@ -598,16 +564,27 @@
         state: absent
       when: "'Windows' in ansible_distribution"
 
-    # - name: Download MySQL Patch
-    #   win_get_url:
-    #     url: '{{ mysqlpatch }}'
-    #     dest: "{{ userdir }}"
-    #   when: "'Windows' in ansible_distribution"
+    - name: Get ProductCode from MSI
+      win_shell: |
+        $msi = "{{ userdir }}\\{{ patchname }}"
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($msi, 0))
+        $query = "SELECT `Value` FROM `Property` WHERE `Property` = 'ProductCode'"
+        $view = $database.OpenView($query)
+        $view.Execute()
+        $record = $view.Fetch()
+        $record.StringData(1)
+      register: mysql_product_code
+      when: "'Windows' in ansible_distribution"
+
+    - debug:
+        var: mysql_product_code.stdout_lines[0]
+      when: "'Windows' in ansible_distribution"
 
     - name: Install MySQL using MSI
       win_package:
         path: "{{ userdir }}\\{{ patchname }}"  # Replace with the actual path to the MSI file
-        product_id: "{{ productid }}"
+        product_id: "{{ mysql_product_code.stdout_lines[0] }}"
         state: present
         arguments: /quiet INSTALLDIR="{{ binloc }}" DATADIR="{{ dataloc }}"  # Adjust the install directory as needed
       register: rslt
@@ -619,61 +596,13 @@
       when: "'Windows' in ansible_distribution"
 
     
-    # - name: Restart MySQL service on Windows
-    #   win_service:
-    #     name: "{{ service_name }}"  # Change this if your MySQL service name is different
-    #     state: restarted
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: Run mysqlcheck to verify database tables
-    #   win_command: >
-    #     .\mysqlcheck --defaults-file="{{ userdir }}.my.cnf" --all-databases
-    #   register: mysqlcheck_result
-    #   args:
-    #     chdir: "{{ binloc }}/bin" 
-    #   ignore_errors: yes  # Allow the playbook to continue even if an error occurs
-
-    # - name: Output mysqlcheck results
-    #   debug:
-    #     msg: "{{ mysqlcheck_result }}"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Check for tables that are not OK
-    #   set_fact:
-    #     tables_not_ok: "{{ mysqlcheck_result.stdout_lines | select('search', '^(?!.*OK$).*') | list }}"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Fail if there are tables that are not OK
-    #   fail:
-    #     msg: "The following tables are not OK: {{ tables_not_ok }}"
-    #   when: 
-    #     - tables_not_ok | length > 0
-    #     - "'Windows' in ansible_distribution"
-
-    # - name: Debug to show which tables are OK and not OK (for troubleshooting)
-    #   debug:
-    #     msg: "Checked MySQL tables: {{ mysqlcheck_result.stdout_lines }}"
-    #   when: "'Windows' in ansible_distribution"
-
     - name: Clean up installer
       ansible.windows.win_file:
         path: "{{ userdir }}\\{{ patchname }}"
         state: absent
       when: "'Windows' in ansible_distribution"
 
-    # - name: removebak if success
-    #   ansible.windows.win_file:
-    #       path: "{{ userdir }}\\alldatabases_backup.sql"
-    #       state: absent
-    #   when: 
-    #     - tables_not_ok | length == 0
-    #     - "'Windows' in ansible_distribution"
-
-    # - name: remove cnf if success
-    #   ansible.windows.win_file:
-    #       path: "{{ userdir }}.my.cnf"
-    #       state: absent
-    #   when: tables_not_ok | length == 0 
+   
     
     
      

@@ -2,7 +2,7 @@
   hosts: all  # Replace with your actual Windows host group
   gather_facts: yes
   vars:
-    - dest: C:\Temp
+    - dest: C:\Program Files\Opsware
 
   tasks:
    
@@ -61,8 +61,8 @@
     
     - name:  Preparation - set variables
       set_fact:
-        patchname: "{{ custattrwin.SQLServer_patchname }}"
-        patchid: "{{ custattrwin.SQLServer_patchid }}"
+        patchname: "{{ custattrwin.mssql_patchname }}"
+        patchid: "{{ custattrwin.mssql_patchid }}"
       when: "'Windows' in ansible_distribution"
     
     - name: Download patch file
@@ -112,9 +112,9 @@
       register: post_reboot_status
       when: install_status.rc == 3010
 
-    - name: Delete directory and its contents
+    - name: Delete Patch name
       ansible.windows.win_file:
-        path: "{{ dest }}"
+        path: "{{ dest }}\\{{ patchname }}"
         state: absent
 
     # - name: Run SQL Server 2019 patch

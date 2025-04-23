@@ -139,7 +139,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'DB2_Rootspace':'{{ db2availspace }}', 'DB2_User':'{{ db2user }}', 'DB2_Version':'{{ db2ver }}', 'DB2_Specialbuilds':'{{ db2fixpack }}', 'DB2_Home':'{{ db2home }}', 'DB2_InstallationPath':'{{ db2path }}'}
+                        CAMap = {'db2_rootspace':'{{ db2availspace }}', 'db2_user':'{{ db2user }}', 'db2_ver':'{{ db2ver }}', 'db2_specialbuilds':'{{ db2fixpack }}', 'db2_home':'{{ db2home }}', 'db2_installationpath':'{{ db2path }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
@@ -283,7 +283,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'DB2_Rootspace':'{{ db2availspace }} GB', 'DB2_User':'{{ db2user }}', 'DB2_Version':'{{ db2ver }}', 'DB2_Specialbuilds':'{{ db2fixpack }}', 'DB2_Home':'{{ db2home }}', 'DB2_InstallationPath':'{{ db2path }}'}
+                        CAMap = {'db2_rootspace':'{{ db2availspace }} GB', 'db2_user':'{{ db2user }}', 'db2_version':'{{ db2ver }}', 'db2_specialbuilds':'{{ db2fixpack }}', 'db2_home':'{{ db2home }}', 'db2_installationpath':'{{ db2path }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

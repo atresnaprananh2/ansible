@@ -157,7 +157,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'Postgre_Version':'{{ postgres_version}}', 'Postgre_DataDir': '{{ datadirlnx }}', 'Postgre_Home':'{{ basedirlnx }}', 'Postgre_User': '{{ superusers }}', 'Postgre_Port': '{{ portdb }}', 'Postgre_Mode': '{{ psqlmode }}'}
+                        CAMap = {'postgre_version':'{{ postgresql_version}}', 'postgresql_datadir': '{{ datadirlnx }}', 'postgresql_home':'{{ basedirlnx }}', 'postgresql_user': '{{ superusers }}', 'postgresql_port': '{{ portdb }}', 'postgresql_mode': '{{ psqlmode }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
@@ -181,7 +181,7 @@
 
     #Windows Host Script
     - set_fact:
-        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'search', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
       when: "'Windows' in ansible_distribution"
 
     - name: Get PostgreSQL installation base directory from registry (windows)
@@ -295,7 +295,7 @@
                 if server_details.primaryIP == "{{ ethernet0_ip }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'Postgresql_Version':'{{ CompleteVer }}', 'Postgresql_Datadir': '{{ datadir }}', 'Postgresql_Home':'{{ basedir }}','Postgresql_User': '{{ superuser }}', 'Postgresql_Port': '{{ portpsql }}', 'Postgresql_Mode': '{{ psqlmode }}'}
+                        CAMap = {'postgresql_version':'{{ CompleteVer }}', 'postgresql_datadir': '{{ datadir }}', 'postgresql_home':'{{ basedir }}','postgresql_user': '{{ superuser }}', 'postgresql_port': '{{ portpsql }}', 'postgresql_mode': '{{ psqlmode }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

@@ -290,23 +290,23 @@
       when: "'RedHat' in ansible_distribution"
     
 
-    # - name: remove local repo 1
-    #   shell: rm -rf /var/local_repo
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
+    - name: remove local repo 1
+      shell: rm -rf /var/local_repo
+      args:
+        chdir: '{{ basedirlnx }}'
+      when: "'RedHat' in ansible_distribution"
 
-    # - name: remove local repo 2
-    #   shell: rm -rf /etc/yum.repos.d/LocalRepo.repo
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
+    - name: remove local repo 2
+      shell: rm -rf /etc/yum.repos.d/LocalRepo.repo
+      args:
+        chdir: '{{ basedirlnx }}'
+      when: "'RedHat' in ansible_distribution"
       
-    # - name: repolist yum
-    #   shell: yum repolist
-    #   args:
-    #     chdir: '{{ basedirlnx }}'
-    #   when: "'RedHat' in ansible_distribution"
+    - name: repolist yum
+      shell: yum repolist
+      args:
+        chdir: '{{ basedirlnx }}'
+      when: "'RedHat' in ansible_distribution"
 
     #Windows Host Script
     - name: Create a temporary Python script file get custom attr

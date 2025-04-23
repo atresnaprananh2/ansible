@@ -117,6 +117,11 @@
       ignore_errors: yes
       register: install_status
 
+    - name: Delete directory and its contents
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: absent
+
     - name: Check if reboot is required
       debug:
         msg: >
@@ -126,92 +131,5 @@
     - name: Reboot if required
       win_reboot:
       when: install_status.rc == 3010
-
-    - name: Confirm reboot status
-      win_shell: "echo System reboot completed."
-      register: post_reboot_status
-      when: install_status.rc == 3010
-
-    - name: Delete directory and its contents
-      ansible.windows.win_file:
-        path: "{{ dest }}"
-        state: absent
-
-   
-    # - name: Run the SQL Server patch installer silently
-    #   win_shell: >
-    #     {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename={{ item }} /IAcceptSQLServerLicenseTerms
-    #   args:
-    #     executable: cmd
-    #   ignore_errors: yes
-    #   loop: "{{ instancelist }}"
-    #   register: patch_results
-    #   failed_when: patch_results.rc not in [0, 3010]
-
-
-    # - name: Display the SQL Server instance names
-    #   debug:
-    #     var: patch_results
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-
-    # # - name: Check if a reboot is required
-    # #   win_shell: |
-    # #     (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -ErrorAction SilentlyContinue) -ne $null
-    # #   register: reboot_required
-
-    # - name: Reboot the server if needed
-    #   win_reboot:
-
-    # - name: Identify failed instances
-    #   set_fact:
-    #     failed_instances: >-
-    #       {{ patch_results.results | selectattr('rc', '!=', 0) 
-    #                                 | selectattr('rc', '!=', 3010) 
-    #                                 | map(attribute='item') | list }}
-
-    # - name: Debug failed instances
-    #   debug:
-    #     var: failed_instances
-
-    # - name: Run the SQL Server patch installer silently for remaining instances
-    #   win_shell: >
-    #     {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename={{ item }} /IAcceptSQLServerLicenseTerms
-    #   args:
-    #     executable: cmd
-    #   ignore_errors: yes
-    #   loop: "{{ failed_instances }}"
-    #   when: failed_instances | length > 0
-
-    # # - name: Check if a reboot is required
-    # #   win_shell: |
-    # #     (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -ErrorAction SilentlyContinue) -ne $null
-    # #   register: reboot_required2
-
-    # - name: Reboot the server if needed
-    #   win_reboot:
-        
-
-    # # - name: Check if reboot is required
-    # #   debug:
-    # #     msg: >
-    # #       Installation completed with return code {{ install_status.rc }}.
-    # #       A reboot is {{ 'required' if install_status.rc == 3010 else 'not required' }}.
-
-    # # - name: Reboot if required
-    # #   win_reboot:
-    # #   when: install_status.rc == 3010
-
-    # # - name: Confirm reboot status
-    # #   win_shell: "echo System reboot completed."
-    # #   register: post_reboot_status
-    # #   when: install_status.rc == 3010
-
-
-
-    # - name: Delete directory and its contents
-    #   ansible.windows.win_file:
-    #     path: "{{ dest }}"
-    #     state: absent
 
    

@@ -49,13 +49,13 @@
     - name:  Preparation - set variables 1
       set_fact:
         ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
-        db2patchname: "{{ custattr.DB2_Patch_Name }}"
-        db2patchid: "{{ custattr.DB2_Patch_Id }}"
-        db2home: "{{ custattr.DB2_Home }}"
-        db2installationpath: "{{ custattr.DB2_InstallationPath }}"
-        db2user: "{{ custattr.DB2_User }}"
-        db2installfixpackpath: "{{ custattr.DB2_InstallationPath[:-8] }}"
-        db2version: "{{ custattr.DB2_Version }}"
+        db2patchname: "{{ custattr.db2_patchname }}"
+        db2patchid: "{{ custattr.db2_patchid }}"
+        db2home: "{{ custattr.db2_home }}"
+        db2installationpath: "{{ custattr.db2_installationpath }}"
+        db2user: "{{ custattr.db2_user }}"
+        db2installfixpackpath: "{{ custattr.db2_installationpath[:-8] }}"
+        db2version: "{{ custattr.db2_version }}"
 
       when: "'RedHat' in ansible_distribution"
     
@@ -107,12 +107,12 @@
     
     - name:  Preparation - set variables 2
       set_fact:
-        db2_destdownload: "/tmp"
+        db2_destdownload: "/opt/opsware"
       when: "'RedHat' in ansible_distribution"
 
 
     - name: stop db2 service
-      command: su - db2inst1 -c "db2stop"
+      command: su - {{ db2user }} -c "db2stop"
       register: db2stopchk
       when: 
         - "'RedHat' in ansible_distribution"   
@@ -135,7 +135,7 @@
 
     
     - name: Extract DB2 using server t
-      command: tar -xvzf  {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
+      command: tar -xvzf  {{ db2_destdownload }}/{{ db2patchname }} -C {{ db2_destdownload }}
       when: 
         - "'RedHat' in ansible_distribution"   
         - version_component_rhel != '12'
@@ -143,7 +143,7 @@
 
 
     - name: Extract DB2 using server dec
-      command: tar -xvf {{ db2_destdownload }}/{{ db2patchname }} -C /tmp
+      command: tar -xvf {{ db2_destdownload }}/{{ db2patchname }} -C {{ db2_destdownload }}
       when: 
         - "'RedHat' in ansible_distribution"  
         - version_component_rhel == '12' or version_component_rhel == '11' 
@@ -156,7 +156,7 @@
         no
         EOF
       args:
-        chdir: '/tmp/{{ db2patchdir12 }}'
+        chdir: '{{ db2_destdownload }}/{{ db2patchdir12 }}'
       register: logcheck
       ignore_errors: yes
       when: 
@@ -170,7 +170,7 @@
         no
         EOF
       args:
-        chdir: '/tmp/{{ db2patchdir11 }}'
+        chdir: '{{ db2_destdownload }}/{{ db2patchdir11 }}'
       register: logcheck
       ignore_errors: yes
       when: 
@@ -185,7 +185,7 @@
       when: "'RedHat' in ansible_distribution"   
     
     - name: db2 level check
-      command: su - db2inst1 -c "db2level"
+      command: su - {{ db2user }} -c "db2level"
       register: dblevelchk
       when: 
         - "'RedHat' in ansible_distribution"   
@@ -196,7 +196,7 @@
       when: "'RedHat' in ansible_distribution"   
     
     - name: start db2 service
-      command: su - db2inst1 -c "db2start"
+      command: su - {{ db2user }} -c "db2start"
       register: db2startchk
       when: 
         - "'RedHat' in ansible_distribution"   
@@ -289,20 +289,20 @@
     - name:  Preparation - set variables 1
       set_fact:
         ansible_python_interpreter_aix: "/opt/opsware/agent/bin/python3"
-        db2patchname_aix: "{{ custattr.DB2_Patch_Name }}"
-        db2patchid_aix: "{{ custattr.DB2_Patch_Id }}"
-        db2home_aix: "{{ custattr.DB2_Home }}"
-        db2installationpath_aix: "{{ custattr.DB2_InstallationPath }}"
-        db2user_aix: "{{ custattr.DB2_User }}"
-        db2installfixpackpath_aix: "{{ custattr.DB2_InstallationPath[:-8] }}"
-        db2version_aix: "{{ custattr.DB2_Version }}"
+        db2patchname_aix: "{{ custattr_aix.db2_patchname }}"
+        db2patchid_aix: "{{ custattr_aix.db2_patchid }}"
+        db2home_aix: "{{ custattr_aix.db2_home }}"
+        db2installationpath_aix: "{{ custattr_aix.db2_installationpath }}"
+        db2user_aix: "{{ custattr_aix.DB2_User }}"
+        db2installfixpackpath_aix: "{{ custattr_aix.db2_installationpath[:-8] }}"
+        db2version_aix: "{{ custattr_aix.db2_version }}"
 
       when: "'AIX' in ansible_distribution"
     
     - name: Extract version component 2
       ansible.builtin.set_fact:
-        version_component_2_aix: "{{ db2version | regex_search('v(\\d+)\\.\\d+\\.\\d+\\.\\d+', '\\1') }}"
-        minor_versions_aix: "{{ db2version | regex_search('v\\d+\\.(\\d+)\\.\\d+\\.\\d+', '\\1') }}"
+        version_component_2_aix: "{{ db2version_aix | regex_search('v(\\d+)\\.\\d+\\.\\d+\\.\\d+', '\\1') }}"
+        minor_versions_aix: "{{ db2version_aix | regex_search('v\\d+\\.(\\d+)\\.\\d+\\.\\d+', '\\1') }}"
       when: "'AIX' in ansible_distribution"
 
     - name: set variable rhel
@@ -345,7 +345,7 @@
     
     - name:  Preparation - set variables 2
       set_fact:
-        db2_destdownload_aix: "/tmp"
+        db2_destdownload_aix: "/opt/opsware"
       when: "'AIX' in ansible_distribution"
 
 
@@ -376,7 +376,7 @@
       ansible.builtin.shell: |
         gunzip -c {{ db2_destdownload_aix }}/{{ db2patchname_aix }} | pax -r -s ',^/,,' -v
       args:
-        chdir: /tmp
+        chdir: '{{ db2_destdownload_aix }}'
       when: 
         - "'AIX' in ansible_distribution"  
         - version_component_aix != '12' 
@@ -386,7 +386,7 @@
       ansible.builtin.shell: |
         gunzip -c {{ db2_destdownload_aix }}/{{ db2patchname_aix }} | pax -r -s ',^/,,' -v
       args:
-        chdir: /tmp
+        chdir: '{{ db2_destdownload_aix }}'
       when: 
         - "'AIX' in ansible_distribution"  
         - version_component_aix == '12' or version_component_aix == '11' 
@@ -398,7 +398,7 @@
         no
         EOF
       args:
-        chdir: '/tmp/{{ db2patchdir12_aix }}'
+        chdir: '{{ db2_destdownload_aix }}/{{ db2patchdir12_aix }}'
       register: logcheck
       ignore_errors: yes
       when: 
@@ -412,7 +412,7 @@
         no
         EOF
       args:
-        chdir: '/tmp/{{ db2patchdir11_aix }}'
+        chdir: '{{ db2_destdownload_aix }}/{{ db2patchdir11_aix }}'
       register: logcheck_aix
       ignore_errors: yes
       when: 

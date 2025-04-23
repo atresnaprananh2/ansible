@@ -1,16 +1,15 @@
 - name: Get SQL Server version from Windows Registry
-  hosts: all  # Replace with your actual Windows host group
+  hosts: all  # Replace with your actual Windows host group winsqlservercls1
   gather_facts: yes
   vars:
-    isCluster: "no"
-    # sql_instance: "localhost"  # Replace with the actual SQL Server instance
-    # sql_user: "sa"  # Replace with a valid SQL Server username
-    # sql_password: "Automation@123"  # Replace with a valid password
-    # testpath: "C:\\Program Files\\Microsoft SQL Server\\MSSQL15.MSSQLSERVER\\MSSQL\\Log\\"
+    isCluster: "NA"
+    instancelist: []
+    prodlevellist: []
+    pathloglist: []
+    getsqlnumberlist: []
+    ipaddr: ""
   tasks:
-    - set_fact:
-        ipaddr: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
-      when: "'Windows' in ansible_distribution"
+    
 
     - name: Get Cluster Node
       win_shell: |
@@ -21,10 +20,33 @@
 
     - name:  Preparation - setcustattr
       set_fact:
-        isCluster: "yes"
+        isCluster: "clustered"
       when: 
         - "'Windows' in ansible_distribution"
         - chkcluster.failed == false
+    
+    - name: SHOW CLUSTER
+      debug:
+        var: isCluster
+
+    - set_fact:
+        ipaddr: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Retrieve SQL Server instance names from the registry
+      win_shell: |
+        Get-Item -Path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL" |
+        Select-Object -ExpandProperty Property
+      register: sql_instances
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: Display the SQL Server instance names
+      debug:
+        msg: "SQL Server Instance Names: {{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        
 
     - name: get instance name microsoft sql server 
       win_reg_stat:
@@ -34,155 +56,265 @@
       when: "'Windows' in ansible_distribution"
 
     - debug:
-        msg: "{{ registry_check.properties['MSSQLSERVER']['value'] }}"
+        msg: "{{ registry_check }}"
+      when: "'Windows' in ansible_distribution"
+
 
     - name: set instance
       set_fact:
-        sqlserverinstance: "{{ registry_check.properties['MSSQLSERVER']['value'] }}"
+        instancelist: "{{ instancelist + [registry_check.properties[ item ]['value']] }}"
+      loop: "{{ sql_instances.stdout_lines }}"
       when: 
         - "'Windows' in ansible_distribution"
 
-    - name: setvariable
+    - name: Create modified data by splitting and adding empty columns
       set_fact:
-        getsqlnumber: "{{ sqlserverinstance }}"
-        patchinfo: 'N/A'
-      when: 
-        - "'Windows' in ansible_distribution"
+        convert_data: >
+          
+          {%- set data = [] -%}
+          {%- set counter = 1 -%}
+          {%- for item in instancelist -%}
+            {%- set parts = item.split('.') -%}
+            {%- set _ = data.append({'instance': parts[0] + '.' + parts[1], 'dbversion': '', 'patchlevel': '', 'productupdatelvl': '', 'binpath': '', 'index': counter}) -%}
+            {%- set counter = counter + 1 -%}
+          {%- endfor -%}
+          {{ data }}
 
-    - name: setvariable 2
-      set_fact:
-        pathlog: "C:\\Program Files\\Microsoft SQL Server\\{{ sqlserverinstance }}\\MSSQL\\Log\\"
-      when: 
-        - "'Windows' in ansible_distribution"
-    
-    - debug:
-        msg: "{{ getsqlnumber }}"
-
-    
-    - name: get sql server version 
-      win_reg_stat:
-        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\{{ sqlserverinstance }}\MSSQLServer\CurrentVersion'
-        state: present
-      register: updatelvl
-      when: "'Windows' in ansible_distribution"
-
-    - name: get installeddir
-      win_reg_stat:
-        path: 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\{{ sqlserverinstance }}\Setup'
-        state: present
-      register: installdir
-      when: "'Windows' in ansible_distribution"
-    
-    
-    - name: setvariable
-      set_fact:
-        productupdatelevel: "{{ updatelvl.properties['CurrentVersion']['value'] }}"
-        bindir: "{{ installdir.properties['SqlProgramDir']['raw_value'] }}"
-      when: 
-        - "'Windows' in ansible_distribution"
-  
-    
-    
-    - name: Convert backslashes to slashes using PowerShell
-      win_shell: |
-        $Path = "{{ bindir | replace('"', '\"') }}"
-        $ConvertedPath = $Path -replace '\\', '/'
-        Write-Output $ConvertedPath
-      register: converted_path_output
-
-    - name: Display converted path
+    - name: Debug modified data
       debug:
-        msg: "Converted path: {{ converted_path_output.stdout }}"
+        var: convert_data
 
-    - name: setvariable 2
-      set_fact:
-        sqlserverinstalldir: "{{ converted_path_output.stdout | regex_replace('\\r\\n', '') }}"
-      when: 
-        - "'Windows' in ansible_distribution"
-
-    - name: chk
-      debug:
-        var: sqlserverinstalldir
     
-    - name: Get Version 
-      win_shell: |
-         $paths = @(
-          "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\{{ sqlserverinstance }}\Setup"
-          )
-          foreach ($path in $paths) {
-            if (Test-Path $path) {
-              $productName = (Get-ItemProperty -Path $path).Edition
-              $productVersion = (Get-ItemProperty -Path $path).Version
-              "$productName"
-              break
-            }
-          }  
+    - name: Convert to JSON object with server name as the key
+      set_fact:
+        sqlsrv_json_obj: >
+          {%- set data_dict = {} -%}
+          {%- for item in convert_data -%}
+            {%- set _ = data_dict.update({item['instance']: item}) -%}
+          {%- endfor -%}
+          {{ data_dict }}
 
-      register: productinfo
+    - name: Convert to JSON string if needed
+      set_fact:
+        json_stringtest: "{{ sqlsrv_json_obj | to_json }}"
+
+    - name: Debug JSON string
+      debug:
+        var: json_stringtest
 
     - name: Get middle two characters
       set_fact:
-        mainver: "{{ sqlserverinstance[5:7] }}"  # Start at index 3 and take 2 characters
-
-    - name: Display extracted middle characters
+        mainver: "{{ instancelist[0][5:7] }}"  # Start at index 3 and take 2 characters
+    - name: Show patch level information
       debug:
-        msg: "Extracted middle characters: {{ productinfo }}"
-    
-    - name: Determine result based on conditions
-      set_fact:
-        sqlreleasever: >-
-          {% if mainver == "15" %}
-          MSSQL 2019
-          {% elif mainver == "16" %}
-          MSSQL 2022
-          {% elif mainver == "14" %}
-          MSSQL 2017
-          {% elif mainver == "13" %}
-          MSSQL 2016
-          {% elif mainver == "12" %}
-          MSSQL 2014
-          {% else %}
-          No conditions met
-          {% endif %}
+        var: mainver
 
-
-
-    - name: set release level 
-      set_fact:
-        dbversion: "{{ sqlreleasever }} {{ productinfo.stdout | regex_replace('\\r\\n', '') }}"
-      when: 
-        - "'Windows' in ansible_distribution"
-    
-    - name: Display result
-      debug:
-        msg: "Result: {{ dbversion }}"
    
-    - name: Get distinct KB numbers from SQL Server ERRORLOGs
+   
+
+    - name: Run PowerShell script to get updates
       win_shell: |
-        $sqlLogPath = "{{ pathlog }}"
-        Get-ChildItem -Path $sqlLogPath -Filter "ERRORLOG*" | ForEach-Object {
-            Select-String -Path $_.FullName -Pattern "KB\d+" | ForEach-Object {
-                $_.Matches.Value
+        # PowerShell script here
+        $instances = "{{ instancelist | join(',') }}" -split ","
+        $iscluster = "{{ isCluster }}"
+        $counter = 1  
+        $dbvers = ""
+        $KBsString = ""
+        $updates = @()
+
+        foreach ($instance in $instances) {
+            $mainver = $instance.Substring(5, 2)  # Extract starting at index 5 for 2 characters
+            $verdef = ""
+            if ($mainver -eq "15") {
+                $verdef = "MSSQL 2019"
+            } elseif ($mainver -eq "16") {
+                $verdef = "MSSQL 2022"
+            } elseif ($mainver -eq "14") {
+                $verdef = "MSSQL 2017"
+            } elseif ($mainver -eq "13") {
+                $verdef = "MSSQL 2016"
+            } elseif ($mainver -eq "12") {
+                $verdef = "MSSQL 2014"
+            } else {
+                $verdef = "No conditions met"
             }
-        } | Select-Object -Unique
-      register: patchlist
-      args:
-        executable: powershell
+           
+           
+            $registryPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instance\Setup"
+            $sqlLogPath = "C:/Program Files/Microsoft SQL Server/$instance/MSSQL/Log/"
+            $KBs = Get-ChildItem -Path $sqlLogPath -Filter "ERRORLOG*" | ForEach-Object {
+                Select-String -Path $_.FullName -Pattern "KB\d+" | ForEach-Object {
+                    $_.Matches.Value
+                }
+            } | Select-Object -Unique
 
-    - name: Show distinct KB numbers
+            # Join the results using a semicolon as a separator
+            $KBsString = $KBs -join ";"    
+           
+            if ($iscluster -eq "clustered") {
+                $logDirectory = "C:\Program Files\Microsoft SQL Server\150\Setup Bootstrap\Log"
+                $summaryFile = Join-Path -Path $logDirectory -ChildPath "summary.txt"
+
+                # Check if the summary.txt file exists
+                if (Test-Path $summaryFile) {
+                    # Read the content of the summary.txt file
+                    $fileContent = Get-Content $summaryFile
+                    
+                    # Search for KB numbers (pattern like KBxxxxxxx)
+                    $kbNumbers = $fileContent | Select-String -Pattern "KB\d+" | ForEach-Object { $_.Matches.Value }
+                    
+                    # Remove duplicates if any, and display the KB numbers
+                    $KBsString = ($kbNumbers | Sort-Object -Unique) -join "; "
+                    
+                  
+                } else {
+                     $KBsString = "summary.txt file does not exist in the specified directory."
+                }
+            }
+           
+
+            $updateInfo = @{
+                
+                "instance_name" = $instance
+                "updated_instance" = @{
+                    "index" = $counter
+                    "binpath" = ""
+                    "dbversion" = ""
+                    "instance" = $instance
+                    "patchlevel" = ""
+                    "productupdatelvl" = ""
+                }
+            }
+
+            try {
+                foreach ($path in $registryPath) {
+                  if (Test-Path $path) {
+                    $productName = (Get-ItemProperty -Path $path).Edition
+                    $productVersion = (Get-ItemProperty -Path $path).Version
+                    $dbvers = "${verdef} ${productName}"
+                    break
+                  }
+                }
+                $patchlevel = (Get-ItemProperty -Path $registryPath -Name Patchlevel).Patchlevel
+                $instdir = (Get-ItemProperty -Path $registryPath -Name SqlProgramDir).SqlProgramDir
+                $updateInfo.updated_instance.productupdatelvl = $KBsString
+                $updateInfo.updated_instance.binpath = $instdir
+                $updateInfo.updated_instance.dbversion = $dbvers
+                $updateInfo.updated_instance.patchlevel = $patchlevel
+
+            } catch {
+                $updateInfo.updated_instance.patchlevel = "NA"
+                $updateInfo.updated_instance.binpath = "NA"
+                $updateInfo.updated_instance.dbversion = "NA"
+                $updateInfo.updated_instance.patchlevel = "NA"
+            }
+
+            $updates += $updateInfo
+            $counter++  # Increment the counter
+        }
+
+        $updates | ConvertTo-Json -Depth 3 | Out-String
+      register: sql_updates
+
+    - name: Display the gathered SQL Server updates
       debug:
-        var: patchlist.stdout_lines
+        var: sql_updates.stdout
 
-    - name: Concatenate the values into one line
+    - name: Parse SQL updates output
       set_fact:
-        patchinfo: "{{ patchlist.stdout_lines | join(';') }}"
-      when: patchlist.stdout_lines | length > 0
-    
-    - name: Display result
-      debug:
-        msg: "patch: {{ patchinfo }}"
-    
+        sql_updates_parsed: "{{ sql_updates.stdout | from_json }}"
 
+    - name: Update specific instance's column
+      set_fact:
+        sqlsrv_json_obj: "{{ sqlsrv_json_obj | default({}) | combine({ sql_updates_parsed.instance_name: sql_updates_parsed.updated_instance }) }}"
+      when: 
+        - instancelist | length == 1
+
+    - name: Update specific instance's column using loop
+      set_fact:
+        sqlsrv_json_obj: "{{ sqlsrv_json_obj | combine({ item.instance_name: item.updated_instance }) }}"
+      with_items: "{{ sql_updates_parsed }}"
+      loop_control:
+        loop_var: item
+      when: 
+        - instancelist | length > 1
+
+    - name: check ip
+      debug:
+        msg:  "{{ ipaddr | trim }}"
+      when: "'Windows' in ansible_distribution"
+
+    - name: Create a temporary Python script file (Windows) for each instance
+      win_shell: |
+        $instance_name = "{{ item.key }}"
+        $instance_data = "{{ item.value }}"
+        $bin = "{{ item.value.binpath  | replace('"', '\"') }}"
+        $ConvertedPath = $bin -replace '\\', '/'
+        $dbversion = "{{ item.value.dbversion }}"
+        $patchlevel = "{{ item.value.patchlevel }}"
+        $productupdatelvl = "{{ item.value.productupdatelvl }}"
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ipaddr | trim }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {
+                             'mssql_dbinstance_{{ item.value.index }}': '$instance_name',
+                             'mssql_dbversion_{{ item.value.index }}': '$dbversion',
+                             'mssql_productupdatelevel_{{ item.value.index }}': '$productupdatelvl',
+                             'mssql_binpath_{{ item.value.index }}': '$ConvertedPath',
+                             'mssql_patchlevel_{{ item.value.index }}': '$patchlevel'
+
+                        }
+                        # Add instance specific data
+
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok for $instance_name")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        
+        # Define the file path dynamically based on instance name
+        $file_path = "C:\pushcustomattr_$instance_name.py"
+        
+        # Write the script to the file
+        $script | Out-File -FilePath $file_path -Encoding UTF8
+        
+      loop: "{{ sqlsrv_json_obj | dict2items }}"
+      register: checkpath
+      when: "'Windows' in ansible_distribution"
+    
+   
+    - name: Execute the Python scripts (Windows)
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr_{{ item.key }}.py
+      register: result
+      when: "'Windows' in ansible_distribution"
+      loop: "{{ sqlsrv_json_obj | dict2items }}"
+
+    - name: Remove the temporary Python scripts (Windows)
+      win_file:
+        path: "C:\\pushcustomattr_{{ item.key }}.py"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+      loop: "{{ sqlsrv_json_obj | dict2items }}"
+    
     - name: Get installed SQL Server instances
       win_shell: |
         $sql_instances = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server" | Where-Object { $_.Name -match "MSSQL\d+" }
@@ -236,6 +368,12 @@
       debug:
         msg: "FreeSpace: {{ free_space_gb | float |round(2) }} GB, Size: {{ size_gb | float | round(2) }} GB"
       when: "'Windows' in ansible_distribution"
+
+
+    - name: check ip
+      debug:
+        var: ipaddr
+      when: "'Windows' in ansible_distribution"
     
      
     - name: Create a temporary Python script file (Windows)
@@ -254,10 +392,10 @@
             server_refs = server_service.findServerRefs(filter)
             for server_ref in server_refs:
                 server_details = ts.server.ServerService.getServerVO(server_ref)
-                if server_details.primaryIP == "{{ ipaddr }}" :
+                if server_details.primaryIP == "{{ ipaddr | trim  }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'MSSQL_isClustered':'{{ isCluster }}', 'MSSQL_Space':'{{ free_space_gb | float |round(2) }} GB','MSSQL_TotalDB':'{{ sql_instances.stdout_lines | length }}', 'MSSQL_DBVersion':'{{ dbversion }}', 'MSSQL_PatchLevel':'{{ patchinfo }}', 'MSSQL_ProductUpdateLevel': '{{ productupdatelevel }}', 'MSSQL_DBInstance':'{{ sqlserverinstance }}', 'MSSQL_BinPath': '{{ sqlserverinstalldir }}'}
+                        CAMap = {'mssql_isclustered':'{{ isCluster }}', 'mssql_space':'{{ free_space_gb | float |round(2) }} GB','mssql_totaldb':'{{ sql_instances.stdout_lines | length }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:
