@@ -1,5 +1,8 @@
-- hosts: all
+- hosts: oracle19test2
   gather_facts: true
+  remote_user: root
+  become: true
+  become_user: root
   name: Oracle Patching started...
   vars:
     - isupdateopatch: "N"

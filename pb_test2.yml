@@ -1,17 +1,27 @@
-- name: Get SQL Server version from Windows Registry
-  hosts: winsqlservercls1  # Replace with your actual Windows host group winsqlservercls1
-  gather_facts: yes
+- name: Extract OPatch version from Oracle patch README
+  hosts: oracle12
+  remote_user: root
+  become: true
+  become_user: root
   vars:
-    isCluster: "NA"
-    instancelist: []
-    prodlevellist: []
-    pathloglist: []
-    getsqlnumberlist: []
-    ipaddr: ""
+    patch_zip: "/tmp/p6880880_132000_Linux-x86-64.zip"
+    extract_path: "/opt/opsware/testpatch/p30463660/30463660"
+    patchingdir: "/opt/opsware"
+    patchcodes: "p30463660"
+    patch_number: "30463660"
   tasks:
-    - debug:
-        var: ansible_facts.interfaces
-    - set_fact:
-        ethernet0_ip: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
-    - debug:
-        var: ethernet0_ip
+
+    - name: Find patch directories 
+      find:
+        paths: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number }}"
+        file_type: directory
+        recurse: no
+      register: patch_dirs
+
+    - name: Extract only directory names 
+      set_fact:
+        patch_folder_names: "{{ patch_dirs.files | map(attribute='path') | map('basename') | list }}"
+
+    - name: Show patch folder names
+      debug:
+        msg: "{{ patch_folder_names }}"
