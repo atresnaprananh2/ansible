@@ -1,13 +1,18 @@
-- hosts: win2 #change with all for SA
+- hosts: oracleRAC2 #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
-  # remote_user: root #remove when running on SA Client
-  # become: true #remove when running on SA Client
-  # become_user: root #remove when running on SA Client
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
   vars:
     - fileurl: http://172.19.2.98/patches/postgresql-15.8-1-windows-x64.exe
     - dest: /var/lib
     - installername: "postgresql-15.8-1-windows-x64.exe"
+    - patchname: "p37260974_190000_Linux-x86-64.zip"
+    - patchid: 17780001
+    - opatchname: "p6880880_190000_Linux-x86-64.zip"
+    - opatchid: 16800001
+    - ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
   tasks:
     # - name: Prerequisite --- download patch file
     #   get_url:
@@ -24,8 +29,19 @@
         stdin: >
           from coglib import downloader;
 
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ mysql_patchid }},None,None,'{{ mysql_tarball }}', None, '/tmp'))
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '/opt/opsware'))
       register: test
-      when: "'RedHat' in ansible_distribution"   
-      tags: download,remote
+      # when: "'RedHat' in ansible_distribution"   
+      # tags: download,remote
+
+    # - name: Prerequisite --- download patch file
+    #   command: "{{ ansible_python_interpreter }}"
+    #   args:
+    #     stdin: >
+    #       from coglib import downloader;
+
+    #       downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ opatchid }},None,None,'{{ opatchname }}', None, '/opt/opsware'))
+    #   register: test
+    #   when: "'RedHat' in ansible_distribution"   
+    #   tags: download,remote
      

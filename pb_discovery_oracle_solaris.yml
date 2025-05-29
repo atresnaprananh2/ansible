@@ -1,0 +1,483 @@
+- hosts: all
+  gather_facts: yes
+  name: System Discovery
+  remote_user: root
+  become: true
+  become_user: root
+  vars: 
+    - patch_description: 'No Interim Patch installed'
+    - isclustered: 'no'
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+  
+
+    - name: Display OS distribution and version (linux)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts['default_ipv4']['address'] }}"
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Display OS distribution and version (windows)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts.ip_addresses[1] }}"
+      when: "'Windows' in ansible_distribution"
+
+    #linux script
+    
+    
+    - name: Get Oracle PMON processes
+      shell: ps -ef | grep ora_pmon | grep -v grep
+      register: pmon_output
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Get Oracle PMON processes complete
+      shell: ps -ef | grep pmon
+      register: pmon_output2
+      when: "'Solaris' in ansible_distribution"
+    
+    - name: Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
+      when: "'Solaris' in ansible_distribution"
+    - name: check patch
+      debug:
+        var: oracle_user
+      when: "'Solaris' in ansible_distribution"
+    
+    - name:  Preparation - set variables user
+      set_fact:
+        orclusr: "{{ oracle_user.stdout }}"
+      when: 
+        - "'Solaris' in ansible_distribution"
+
+    - name:  Preparation - set variables
+      set_fact:
+        isclustered: 'yes'
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - "'+ASM' in pmon_output2.stdout"
+
+    
+
+    - name: Find the path oracle home  (linux)
+      command: egrep '^[^#]' /var/opt/oracle/oratab
+      register: oraclehomeinfo
+      args:
+        chdir: '/var/lib'
+      when: "'Solaris' in ansible_distribution"
+
+   
+        
+
+    - name: check latest version  (linux)
+      debug:
+        var: oraclehomeinfo.stdout.split(':')[1]
+      when: "'Solaris' in ansible_distribution"
+
+    
+    - name: check autorun  (linux)
+      debug:
+        var: oraclehomeinfo.stdout.split(':')
+      when: "'Solaris' in ansible_distribution"
+
+    
+    - name: Set fact oratab (linux)
+      set_fact:
+        oraclehome: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
+        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
+        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
+        byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
+        osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
+        patchloc: "/opt/opsware/Patching/"
+      when: "'Solaris' in ansible_distribution"
+
+    - name: check home
+      debug:
+        var: oraclehome
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Find the latest patch installed
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/OPatch/opatch lsinventory' 
+      register: oraclelastpatch
+      args:
+        chdir: '/var/lib'
+      when: "'Solaris' in ansible_distribution"
+
+    - name: check patch
+      debug:
+        var: oraclelastpatch
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Extract patch description
+      set_fact:
+        patchdesc: "{{ oraclelastpatch.stdout | regex_search('Patch description:  \"(.*?)\"', '\\1') }}"
+   
+
+    - name: check patch
+      set_fact:
+        patch_description: "{{ patchdesc[0] }}" 
+      when:  patchdesc != ''
+
+
+    - name: Display the extracted patch description
+      debug:
+        msg: "Extracted Patch Description: {{ patch_description }}"
+
+    - name: Get Oracle Home directory size in GB
+      ansible.builtin.shell: |
+        du -sBG {{ oraclehome }} | cut -f1 | tr -d 'G'
+      register: oracle_home_size
+
+    - name: Display Oracle Home directory size in GB
+      debug:
+        msg: "Oracle Home Size: {{ oracle_home_size.stdout }} GB"
+
+    - name: Check root filesystem space
+      debug:
+        msg: "Root filesystem space: {{ byteleft | float * (1/1000000000)  }} GB available"
+
+    - name: "Get Oracle Version"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
+      register: oracleversion
+      when: "'Solaris' in ansible_distribution"
+    
+    - name: check oracle version  (linux)
+      debug:
+        var:   " oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') "
+       
+      when: "'Solaris' in ansible_distribution"
+
+    - name: "Get Port"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/bin/lsnrctl status' 
+        # when: "oracle_binary_version | splitVersion == '12'"
+      register: oracleport
+      when: "'Solaris' in ansible_distribution"
+
+
+    - name: "Get Opatch Version"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/OPatch/opatch version'
+      register: opatchversion
+      when: "'Solaris' in ansible_distribution"
+
+    - name: check opatch version  (linux)
+      debug:
+        var: "opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '')"
+      when: "'Solaris' in ansible_distribution"
+
+  
+    - name: Set fact version (linux)
+      set_fact:
+        oracleversion: "{{ oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') }}"
+        opatchversion: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
+        oraport: "{{ oracleport.stdout | regex_findall('PORT=([0-9]+)', '\\1') }}"
+        orahomesize: "{{ oracle_home_size.stdout }}"
+        rootsize: "{{ byteleft | float * (1/1000000000)  }}"
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Extract major Oracle version (12.2.0)
+      set_fact:
+        oracle_major_version: "{{ oracleversion | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
+
+    - name: Display major Oracle version
+      debug:
+        msg: "The Oracle major version is: {{ oracle_major_version }}"
+    
+    - name: check port   (linux)
+      debug:
+        var: oraport[0]
+      when: "'Solaris' in ansible_distribution"
+      
+    - name: Check ownership of known Oracle directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: oracle_dir_info
+      with_items:
+        - "/u01/app/oracle"
+        - "/opt/oracle"
+        - "/home/oracle"
+      ignore_errors: yes
+
+    - name: Identify the user owning Oracle directories
+      set_fact:
+        oracle_os_user: "{{ oracle_dir_info.results | selectattr('stat.exists', 'equalto', true) | map(attribute='stat.pw_name') | first }}"
+      when: oracle_dir_info.results | selectattr('stat.exists', 'equalto', true) | list | length > 0
+
+    - name: Check for running Oracle processes
+      ansible.builtin.shell: "ps -eo user,comm | grep pmon | awk '{print $1}' | uniq"
+      register: oracle_process_user
+      ignore_errors: yes
+
+    - name: Set fact for Oracle process user if Oracle directories not found
+      set_fact:
+        oracle_os_user: "{{ oracle_process_user.stdout_lines[0] }}"
+      when: oracle_os_user is not defined and oracle_process_user.stdout_lines | length > 0
+
+    - name: Search for Oracle environment variables in all users
+      ansible.builtin.shell: "cat /etc/passwd | cut -d: -f1 | xargs -n 1 -I {} bash -c 'echo User: {} && sudo -u {} env | grep ORACLE_HOME' | grep User"
+      register: oracle_env_user
+      ignore_errors: yes
+
+    - name: Set fact for Oracle environment user if not already found
+      set_fact:
+        oracle_os_user: "{{ oracle_env_user.stdout | regex_findall('User: (.+)') | first }}"
+      when: oracle_os_user is not defined and oracle_env_user.stdout | length > 0
+
+    - name: Display Oracle OS user
+      debug:
+        msg: "Oracle OS User: {{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}"
+
+    - name: Run ps command and grep for tnslsnr
+      shell: ps -ef | grep tnslsnr | grep -v grep
+      register: ps_output
+
+    - name: Extract tnslsnr path
+      shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
+      register: tnslsnr_path
+
+    - name: Display tnslsnr executable path without newline
+      debug:
+        msg: |
+          {% if tnslsnr_path.stdout != "" %}
+            The Oracle listener executable (tnslsnr) path is: {{ tnslsnr_path.stdout }}
+          {% else %}
+            tnslsnr executable not found.
+          {% endif %}
+
+    - name: Extract listener name from process details
+      set_fact:
+        listener_name: "{{ ps_output.stdout | regex_search('tnslsnr\\s+(\\S+)') | replace('tnslsnr ', '') | trim }}"
+
+    - name: Display listener name
+      debug:
+        msg: "The Oracle listener name is: {{ listener_name }}"
+
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'RootSpace': '{{ rootsize }}','Oracle_HomeSpace': '{{ orahomesize }}', 'Oracle_Cluster': '{{ isclustered }}', 'Oracle_OSVersion': '{{ osver }}', 'Oracle_DBVersion':'{{ oracleversion }}', 'Oracle_user': '{{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}', 'Oracle_Instance': '{{ instance }}','Oracle_Listener' : '{{ tnslsnr_path.stdout }}', 'Oracle_Home':'{{ oraclehome }}','Oracle_Backup_Loc': 'NA', 'patch_file_location': '{{ patchloc }}','Oracle_OPatch_Version':'{{ opatchversion }}', 'Oracle_port': '{{ oraport[0] }}', 'Oracle_autorun': '{{ autorun }}', 'Oracle_PatchInfo': '{{ patch_description }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output.stdout }}" 
+      when: "'Solaris' in ansible_distribution"
+   
+
+
+   
+
+
+
+    
+
+    # #Windows Host Script
+
+    # - name: Get PostgreSQL installation base directory from registry (windows)
+    #   win_reg_stat:
+    #     path: HKLM:\SOFTWARE\PostgreSQL\Installations
+    #   register: postgres_installations
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Get Global PostgreSQL (windows)
+    #   win_reg_stat:
+    #     path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
+    #   register: postgresglobal
+    #   when: "'Windows' in ansible_distribution"
+    
+    # - name: Check Postgre Installed Ver (windows)
+    #   debug:
+    #     msg: "PostgreSQL {{ postgresglobal.properties['Version']['value'] }}"   
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Get the first installation ID (windows)
+    #   set_fact:
+    #     installation_id: "{{ postgres_installations.sub_keys[0] }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Retrieve installation directory (windows)
+    #   win_reg_stat:
+    #     path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
+    #   register: postgres_installation_dir2
+    #   when: "'Windows' in ansible_distribution"
+
+    
+    
+   
+    # - name: Set fact base dir (windows)
+    #   set_fact:
+    #     basedir: "{{ postgres_installation_dir2.properties['Base Directory']['value'] }}"
+    #     datadir: "{{ postgres_installation_dir2.properties['Data Directory']['value'] }}"
+    #     installedver: "{{ postgresglobal.properties['Version']['value'] }}"
+    #     CompleteVer: "{{ postgres_installation_dir2.properties['CLT_Version']['value'] }}"
+    #     serviceid: "{{ postgres_installation_dir2.properties['Service ID']['value'] }}"
+    #     superuser: "{{ postgres_installation_dir2.properties['Super User']['value'] }}"
+
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Execute SQL command to get PostgreSQL port
+    #   win_shell: |
+    #     $env:PGPASSWORD = "P@ssw0rdnh2"
+    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "SHOW port;" -t
+    #   become: yes
+    #   become_method: runas
+    #   become_user: postgres
+    #   register: postgres_port
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Display the PostgreSQL port
+    #   debug:
+    #     msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Execute SQL command to get PostgreSQL port
+    #   win_shell: |
+    #     $env:PGPASSWORD = "P@ssw0rdnh2"
+    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
+    #   become: yes
+    #   become_method: runas
+    #   become_user: postgres
+    #   register: postgremode
+    #   when: "'Windows' in ansible_distribution"
+    
+    # - name: Set mode (windows)
+    #   set_fact:
+    #     psqlmode: 'standalone'
+    #   when: 
+    #     - "'Windows' in ansible_distribution"
+    #     - "postgremode.stdout != 't'" 
+
+    # - name: Set fact port  (windows)
+    #   set_fact:
+    #     portpsql: "{{ postgres_port.stdout.strip() }}"
+    #   when: "'Windows' in ansible_distribution"
+       
+    
+
+   
+    # - name: Check Version
+    #   win_shell: |
+    #       # Ensure PowerShell uses TLS 1.2
+    #       [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    #       # Alternatively, use TLS 1.3 if supported
+    #       # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
+
+    #       # Now run your Invoke-WebRequest command
+    #       $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
+
+    #       # Extract version numbers that match "v15.x.x"
+    #       $versions = $response.Content -split "`n" | ForEach-Object {
+    #           if ($_ -match 'v{{ installedver }}\.[0-9]+') {
+    #               $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
+    #               if ($matches.Success) {
+    #                   $matches.Value
+    #               }
+    #           }
+    #       }
+
+    #       # Sort the versions and select the latest one
+    #       $latest_version = $versions | Sort-Object | Select-Object -Last 1
+
+    #       # Display the latest version
+    #       $latest_version
+    #   register: latestver
+    #   when: "'Windows' in ansible_distribution"
+    
+    # - name: check latest version  (windows)
+    #   debug:
+    #     var: latestver.stdout[1:-2]
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Set updateflag
+    #   set_fact:
+    #     needupdates: y
+    #   when: 
+    #     - "'Windows' in ansible_distribution"
+    #     - "installedver != latestver.stdout[1:-2]"
+
+    # - name: Create a temporary Python script file
+    #   win_shell: |
+    #     $script = @"
+    #     import pytwist
+    #     from pytwist import * 
+    #     from pytwist.com.opsware.search import Filter
+    #     from pytwist import twistserver
+    #     from pytwist.com.opsware.server import ServerRef
+    #     import json
+    #     ts = pytwist.twistserver.TwistServer()
+    #     try:
+    #         ts.authenticate("aditya", "Nh2server!")
+    #         server_service = ts.server.ServerService
+    #         filter = Filter()
+    #         server_refs = server_service.findServerRefs(filter)
+    #         for server_ref in server_refs:
+    #             server_details = ts.server.ServerService.getServerVO(server_ref)
+    #             if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
+    #                 try:
+    #                     server_details = ts.server.ServerService.getServerVO(server_ref)
+    #                     CAMap = {'Version':'{{ CompleteVer }}', 'datadir': '{{ datadir }}','databaseplatform': 'PostgreSQL', 'Home':'{{ basedir }}','os_user': '{{ superuser }}', 'port': '{{ portpsql }}', 'mode': '{{ psqlmode }}'}
+    #                     ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+    #                     print("ok")
+    #                 except Exception as e:
+    #                     print(f"Error processing server {server_ref.getId()}: {e}")
+          
+    #     except Exception as e:
+    #         print(f"Failed to authenticate: {str(e)}")
+    #         exit(1)
+    #     "@
+    #     $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Execute the Python script
+    #   win_shell: |
+    #     cd "C:\Program Files\Opsware\agent\python3"
+    #     .\python C:\pushcustomattr.py
+    #   register: result
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Display the output
+    #   debug:
+    #     var: result.stdout
+    #   when: "'Windows' in ansible_distribution"
+
+    # - name: Remove the temporary Python script
+    #   win_file:
+    #     path: C:\pushcustomattr.py
+    #     state: absent
+    #   when: "'Windows' in ansible_distribution"
+  
+
+    
+
+
+
+
+    

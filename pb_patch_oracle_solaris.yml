@@ -1,0 +1,482 @@
+- hosts: oraclesol
+  gather_facts: true
+  remote_user: root
+  become: true
+  become_user: root
+  name: Oracle Patching started...
+  vars:
+    - isupdateopatch: "N"
+    - readmecontent: ""
+  tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'Solaris' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'Solaris' in ansible_distribution"
+
+    - name:  Preparation - set variables
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        patchname: "{{ custattr.oracle_patchname }}"
+        patchid: "{{ custattr.oracle_patchid }}"
+        isupdateopatch: "{{ custattr.isupdateopatch }}"
+
+      when: "'Solaris' in ansible_distribution"
+
+    - name:  Preparation - set variables to update opatch
+      set_fact:
+        opatchname: "{{ custattr.oracle_opatchname }}"
+        opatchid: "{{ custattr.oracle_opatchid }}"
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+
+   
+
+    #discovery start
+    - name: Discovery - Get Oracle User
+      shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
+      register: oracle_user
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Discovery - Find the path oracle home  (linux)
+      command: egrep '^[^#]' /var/opt/oracle/oratab
+      register: oraclehomeinfo
+      args:
+        chdir: '/var/lib'
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Discovery - check latest version  (linux)
+      debug:
+        var: oraclehomeinfo.stdout.split(':')[1]
+      when: "'Solaris' in ansible_distribution"
+
+    
+    - name: Discovery - Set fact oratab (linux)
+      set_fact:
+        oracle_home_path: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
+        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
+        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
+        byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
+        osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Preparation - set patching dir
+      set_fact:
+        patchingdir: "/opt/opsware"
+      when: "'Solaris' in ansible_distribution"
+
+  
+
+    - name: "Discovery - Get Oracle Version"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
+      register: oracleversion
+      when: "'Solaris' in ansible_distribution"
+    
+    - name: Discovery - check oracle version  (linux)
+      debug:
+        var:   " oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') "
+      when: "'Solaris' in ansible_distribution"
+
+    - name: "Discovery - Get Opatch Version"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/OPatch/opatch version'
+      register: opatchversion
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Discovery - check opatch version  (linux)
+      debug:
+        var: "opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '')"
+      when: "'Solaris' in ansible_distribution"
+
+  
+    - name: Preparation - Set fact version (linux)
+      set_fact:
+        oraver: "{{ oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') }}"
+        opatchver: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Preparation - Extract major Oracle version
+      set_fact:
+        oracle_binary_version: "{{ oraver | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
+        opatch_version_int: '{{ opatchver | replace(".", "") }}'
+
+    - name: Preparation - get binary version
+      set_fact:
+        oracle_binary_version_int: '{{ oracle_binary_version | replace(".", "") }}'
+
+    
+    - name: Discovery - Run ps command and grep for tnslsnr
+      shell: ps -ef | grep tnslsnr | grep -v grep
+      register: ps_output
+
+    - name: Discovery - Extract tnslsnr path
+      shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
+      register: tnslsnr_path
+
+    - name: Discovery - Display tnslsnr executable path without newline
+      debug:
+        msg: |
+          {% if tnslsnr_path.stdout != "" %}
+            The Oracle listener executable (tnslsnr) path is: {{ tnslsnr_path.stdout }}
+          {% else %}
+            tnslsnr executable not found.
+          {% endif %}
+
+    - name: Discovery - Extract listener name from process details
+      set_fact:
+        listenername: "{{ ps_output.stdout | regex_search('tnslsnr\\s+(\\S+)') | replace('tnslsnr ', '') | trim }}"
+
+    - name: Discovery - Display listener name
+      debug:
+        msg: "The Oracle listener name is: {{ listenername }}"
+
+    #end of discovery
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '{{ patchingdir }}'))
+      register: test
+      tags: download,remote
+
+
+    - name: Prerequisite --- download opatch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ opatchid }},None,None,'{{ opatchname }}', None, '{{ patchingdir }}'))
+      register: test
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags: download,remote
+
+    - name: Prerequisite --- Extract base patch name 
+      set_fact:
+        patchcodes: "{{ patchname | regex_search('^p[0-9]+') }}"
+        patch_number: "{{ patchname | regex_search('p([0-9]+)', '\\1') }}"
+    
+    - name: Prerequisite --- Check if directory exists, if not create it
+      ansible.builtin.file:
+        path: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+        state: directory
+        mode: '0755' 
+
+    
+    - name: "Step 1 --- unzip patch"
+      unarchive: 
+        src: '{{ patchingdir }}/{{ patchname }}'
+        dest: '{{ patchingdir }}/{{ patchcodes }}'
+        list_files: yes
+        owner: "{{ oracle_user.stdout }}"
+        remote_src: yes
+      tags:
+        - debug
+        - prep
+    - name: Step 1 a --- Check patch content
+      find:
+        paths: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+        file_type: any
+        depth: 1
+      register: patch_content
+
+    - name: Set patch type
+      set_fact:
+        patch_type: >-
+          {% set patch_dirs = patch_content.files
+              | map(attribute='path')
+              | map('basename')
+              | select('match', '^[0-9]+$')
+              | list %}
+          {{ 'multiple' if (patch_dirs | length > 0) else 'single' | trim | lower }}
+
+    - name: Check patchtype
+      debug:
+        var: patch_type
+      when: "'Solaris' in ansible_distribution"
+
+
+    - name: Step 2 --- Find README file
+      ansible.builtin.find:
+        paths: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+        patterns: 'README*'
+        file_type: file
+      register: readme_files
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+
+    - name: Step 3 --- Extract readme content
+      set_fact:
+        readmecontent: "{{ readme_files.matched }}"
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+    
+
+    - name: Step 4 --- Read README content
+      ansible.builtin.slurp:
+        src: "{{ readme_files.files[0].path }}"
+      register: readme_content
+      when: 
+        - readmecontent | length > 0
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+      
+
+    - name: Step 5 --- Extract required OPatch version
+      set_fact:
+        opatch_required: "{{ (readme_content.content | b64decode).splitlines() | select('match', '.*[oO][pP]atch.*[vV]ersion.*') | list | default('NA') }}"
+      when: 
+        - readmecontent | length > 0
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+
+
+    - name: "Step 6 --- Print the value of the minimum required OPatch version specified"
+      debug:
+        msg: "The value of the minimum required OPatch version is {{ opatch_required }}"
+      tags:
+        - debug
+        - prep
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+
+    - name: "Step 7 --- Find the OPatch directory"
+      file: 
+        path: '{{ oracle_home_path }}/OPatch'
+        state: directory
+      register: opatch_dir_check
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags:
+        - prep
+
+    - name: "Step 8 --- Check the system version of OPatch"
+      command: "sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch version'"
+      register: system_opatch_version
+      tags:
+        - prep
+
+    - name: "Step 9 --- Parse system_opatch_version output register to contain only necessary characters"
+      set_fact:
+        system_opatch_version: '{{ system_opatch_version.stdout_lines[0] | replace("OPatch Version: ", "") }}'
+      tags:
+        - prep
+        
+    - name: "Step 10 --- Print the parsed system value of OPatch version"
+      debug:
+        msg: "The systems's value of the OPatch version is {{ system_opatch_version }}"
+      tags:
+        - debug
+        - prep
+
+    - name: Step 11 --- rename opatch dir
+      command: "mv {{ oracle_home_path }}/OPatch {{ oracle_home_path }}/OPatch_bak"
+      #when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags:
+        - prep
+
+    - name: Step 12 --- Install the latest OPatch ({{ opatch_latest_zip }})
+      ansible.builtin.unarchive:
+        src: '{{ patchingdir }}/{{ opatchname }}'
+        dest: '{{ oracle_home_path }}'
+        remote_src: yes
+        keep_newer: true 
+        owner: oracle
+      #when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags:
+        - prep
+
+    - name: "Step 13 --- Obtain the list of patches installed in current $ORACLE_HOME"
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+      register: chkpatch
+      tags:
+        - prep
+
+    - name: Step 14 --- check patch result
+      debug:
+        msg:
+          - "{{ chkpatch }}"
+
+    - name: "Step 15 --- Identify all of the running listeners"
+      shell: ps -ef | grep lsnr
+      changed_when: no
+      register: listenerOutput
+      tags:
+        - patching
+      
+    
+  
+    - name: "Step 16 --- Stop the named listeners from the {{ oracle_binary_version }} home"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl stop {{ listenername }}' 
+      tags:
+        - patching
+
+    - name: Step 17 --- Create shutdown script for Oracle
+      copy:
+        dest: /opt/opsware/stopDatabase.sh
+        content: |
+          sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba' << EOF
+          shutdown immediate;
+          exit
+          EOF
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0750'
+
+    - name: Step 18 --- Shutdown Oracle database 
+      command: sh '/opt/opsware/stopDatabase.sh'
+      register: chkrslt
+    
+    - name: delete shutdown script file
+      file:
+        path: /opt/opsware/stopDatabase.sh
+        state: absent
+
+    - name: Step 19 --- Show patching dirs
+      debug:
+        msg: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+    
+    - name: Step 20 --- ind patch directories 
+      find:
+        paths: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+        file_type: directory
+        recurse: no
+      register: patch_dirs
+
+    - name: Step 21 ---  Extract only directory names 
+      set_fact:
+        patch_folder_names: "{{ patch_dirs.files | map(attribute='path') | map('basename') | list }}"
+
+    - name: Step 22 ---  Show patch folder names
+      debug:
+        msg: "{{ patch_folder_names }}"
+
+    
+    - name: Step 23 a --- install patch
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply -oh $ORACLE_HOME -silent {{ item }}/'
+      loop: "{{ patch_folder_names }}"
+      ignore_errors: yes
+      args:
+        chdir: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - patch_type == "multiple"
+
+    - name: Step 23 b --- install patch
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply -oh $ORACLE_HOME -silent {{ patch_number[0] }}/'
+      ignore_errors: yes
+      args:
+        chdir: "{{ patchingdir }}/{{ patchcodes }}"
+      when: 
+        - "'Solaris' in ansible_distribution"
+        - patch_type == "single"
+        
+
+    
+    - name: "Step 24 --- verify patching"
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+      register: chkpatch2
+      tags:
+        - prep
+
+    - name: Step 25 --- check patching result
+      debug:
+        msg:
+          - "{{ chkpatch2 }}"
+   
+    - name: "Step 26 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl start {{ listenername }}' 
+      tags:
+        - patching
+
+    - name: Step 27 ---  Create startup script for Oracle
+      copy:
+        dest: /opt/opsware/startDatabase.sh
+        content: |
+          sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba' << EOF
+          startup;
+          exit
+          EOF
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0750'
+
+    - name: Step 28 --- start Oracle database 
+      command: sh '/opt/opsware/startDatabase.sh'
+      register: chkrsltstart
+    
+    - name: delete startup script file
+      file:
+        path: /opt/opsware/startDatabase.sh
+        state: absent
+    
+    - name: Step 29 --- check start db
+      debug:
+        var: chkrsltstart
+      when: "'Solaris' in ansible_distribution"
+
+
+    - name: "Final --- Remove the Ansible patching directory"
+      file:
+        path: '{{ patchingdir }}/{{ patchcodes }}'
+        state: absent
+      tags:
+        - final
+        - post
+    - name: "Final --- Remove the Ansible patching file"
+      file:
+        path: '{{ patchingdir }}/{{ patchname }}'
+        state: absent
+      tags:
+        - final
+        - post
+
+    
+
+      
+   

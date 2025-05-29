@@ -1,0 +1,110 @@
+- name: Configure SRU 80 IPS repository on Solaris
+  hosts: oraclesol
+  become: true
+  remote_user: root
+  become: true
+  become_user: root
+  vars:
+    - destdownload: "/opt/opsware"
+  tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'Solaris' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'Solaris' in ansible_distribution"
+
+    - name:  Preparation - set variables
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        patchname: "{{ custattr.sru_patchname }}"
+        patchid: "{{ custattr.sru_patchid }}"
+      when: "'Solaris' in ansible_distribution"
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '{{ destdownload }}'))
+      register: test
+      tags: download,remote
+
+   
+    - name: Check if directory exists, if not create it
+      file:
+        path: "/IPS"
+        state: directory
+
+    - name: Check if directory exists, if not create it
+      file:
+        path: "/IPS/repo"
+        state: directory
+
+    - name: Check if directory exists, if not create it
+      file:
+        path: "/IPS/repo/11.4.8"
+        state: directory
+
+    - name: Ensure unzip is installed
+      ansible.builtin.package:
+        name: unzip
+        state: present
+
+    - name: Unzip the file
+      ansible.builtin.command: unzip {{ destdownload}}/{{ patchname}} -d /IPS/repo/11.4.8/
+
+    - name: Get the extracted directory name (only one expected)
+      ansible.builtin.command: ls -1 /IPS/repo/11.4.8
+      register: unzip_output
+
+    - name: Set the extracted directory as a fact
+      ansible.builtin.set_fact:
+        extracted_dir: "{{ unzip_output.stdout_lines[0] }}"
+
+    - name: Debug extracted directory name
+      ansible.builtin.debug:
+      msg: "The extracted directory is: {{ extracted_dir }}"
+        
+    - name: Set local Solaris publisher to SRU 80
+      ansible.builtin.shell: |
+
+
+    - name: Update entire system to SRU 80 (dry run)
+      ansible.builtin.shell: |
+        pkg update -nv
+
+    - name: delete patch file
+      file:
+        path: "{{ destdownload}}/{{ patchname }}"
+        state: absent
