@@ -48,38 +48,42 @@
     - name:  Preparation - set variables
       set_fact:
         ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
-        oracle_prep_patch_dir: "/opt/opsware/Patching/"
-        ansible_patches_dir: "/opt/opsware/Ansiblepatch/"
-        oracle_script_prep: "/opt/opsware/Ansiblepatch/"
-        opatch_latest_zip: "{{ custattr.opatchname }}"
-        opatch_latest_zip_id: "{{ custattr.opatchid }}"
-        pexpectinstaller: "pexpect-3.3.tar.gz"
-        pexpectinstaller_id: "7710001"
-        prepscripts: "requiredscripts.zip"
-        prepscripts_id: "7700001"
-        oneoff_latest_zip: "{{ custattr.patchname }}"
-        oneoff_latest_zip_id: "{{ custattr.patchid }}"
-        patchcode: "{{ custattr.patchcode }}"
-        oneoff_patch_dir: "{{ custattr.oracle_oneoffpatchdir }}"
+        patchname: "{{ custattr.oracle_patchname }}"
+        patchid: "{{ custattr.oracle_patchid }}"
+        isupdateopatch: "{{ custattr.isupdateopatch }}"
+
       when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables to update opatch
+      set_fact:
+        opatchname: "{{ custattr.oracle_opatchname }}"
+        opatchid: "{{ custattr.oracle_opatchid }}"
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - isupdateopatch == "Y"
 
     - name: Extract the number after 'p' and before '_'
       set_fact:
-        patch_number: "{{ oneoff_latest_zip | regex_search('p(\\d+)_', '\\1') }}"
-
+        patch_number: "{{ patchname | regex_search('p(\\d+)_', '\\1') }}"
+    
+    - name: Debug patch number
+      debug:
+        var: patch_number
 
     - name:  Preparation - set variables 2
       set_fact:
-        oneoff_patch_dir_int: '{{ oneoff_patch_dir | replace("p", "", 1) }}'
-        listener_file_path: '{{ oracle_script_prep }}/listenerOutput'
+        oneoff_patch_dir_int: '{{ patchname | replace("p", "", 1) }}'
       when: "'RedHat' in ansible_distribution"
     
     - name: Get Oracle User
       shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
       register: oracle_user
       when: "'RedHat' in ansible_distribution"
-
-
+    
+    - name: "get user grid"
+      shell: ps -eo user,args | grep -E "crsd\.bin|ocssd\.bin|evmd\.bin" | grep -v grep | awk '{print $1}' | sort | uniq | grep -v root 
+      register: usergrid
+     
    
     
 
@@ -160,117 +164,145 @@
         msg: "Device ID: {{ item }}"
       loop: "{{ deviceid }}"
 
-    - name: RAC Loop patching
-      shell: "{{ ansible_python_interpreter }} -"
-      args:
-        stdin: |
-          from pytwist.com.opsware.job import JobRef
-          import time
-          from pytwist import twistserver
-          from pytwist.com.opsware.script import ServerScriptJobArgs
-          from pytwist.com.opsware.server import ServerRef
+    # - name: RAC Loop patching
+    #   shell: "{{ ansible_python_interpreter }} -"
+    #   args:
+    #     stdin: |
+    #       from pytwist.com.opsware.job import JobRef
+    #       import time
+    #       from pytwist import twistserver
+    #       from pytwist.com.opsware.script import ServerScriptJobArgs
+    #       from pytwist.com.opsware.server import ServerRef
 
-          # Authenticate to the TwistServer
-          ts = twistserver.TwistServer()
-          ts.authenticate("admin", "nh2123")
+    #       # Authenticate to the TwistServer
+    #       ts = twistserver.TwistServer()
+    #       ts.authenticate("admin", "nh2123")
 
-          # Set up script execution arguments
-          args = ServerScriptJobArgs()
-          args.targets = [ServerRef({{ item }})]
+    #       # Set up script execution arguments
+    #       args = ServerScriptJobArgs()
+    #       args.targets = [ServerRef({{ item }})]
 
-          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
-          args.timeOut = 3600    # Timeout after 1 hr
+    #       args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+    #       args.timeOut = 7200    # Timeout after 2 hrs
 
-          userTag = "adHoc SHELL script"
+    #       userTag = "adHoc SHELL script"
 
-          # PowerShell script to create and execute the Python script
-          source = '''
-          # Step 1: Download the patch using embedded Python
-          cat > /tmp/otsadownload.py <<EOF
-          from coglib import downloader
+    #       # PowerShell script to create and execute the Python script
+    #       source = '''
+    #       # Step 1: Download the patch using embedded Python
+    #       cat > /tmp/otsadownload.py <<EOF
+    #       from coglib import downloader
 
-          downloader.Tsunami().fetch_unit(
-              downloader.DownloadUnit({{ oneoff_latest_zip_id }}, None, None, '{{ oneoff_latest_zip }}', None, '/opt/opsware')
-          )
-          EOF
+    #       downloader.Tsunami().fetch_unit(
+    #           downloader.DownloadUnit({{ patchid }}, None, None, '{{ patchname }}', None, '/opt/opsware')
+    #       )
+    #       EOF
 
-          /opt/opsware/agent/bin/python3 /tmp/otsadownload.py
-          rm -f /tmp/otsadownload.py
+    #       /opt/opsware/agent/bin/python3 /tmp/otsadownload.py
+    #       rm -f /tmp/otsadownload.py
+           
 
-          # Step 2: Extract the patch
-          cd /opt/opsware
-          unzip -o {{ oneoff_latest_zip }}
+    #       #shut off listener
+    #       su - {{ usergrid.stdout }} <<'EOGRIDSTOP'
+    #       # Stop listener
+    #       lsnrctl stop
 
-          # Step 3: Switch to oracle user and perform the patching sequence
-          su - {{ oracle_user.stdout }} <<'EOORACLE'
-          # Stop listener
-          lsnrctl stop
+    #       EOGRIDSTOP
 
-          # Shut down DB instance
-          sqlplus / as sysdba <<EOSQL
-          shutdown immediate;
-          exit;
-          EOSQL
+    #        # Step 3: Switch to oracle user and perform the patching sequence
+    #       su - {{ oracle_user.stdout }} <<'EOORACLE'
+        
+    #       mkdir $ORACLE_HOME/patches
+    #       unzip -o /opt/opsware/{{ patchname }} -d $ORACLE_HOME/patches
 
-          # Apply the patch
-          cd /opt/opsware/{{ patch_number }}
-          $ORACLE_HOME/OPatch/opatch apply -silent
+    #       # Shut down DB instance
+    #       sqlplus / as sysdba <<EOSQL
+    #       shutdown immediate;
+    #       exit;
+    #       EOSQL
+
+    #       # Apply the patch
+    #       cd $ORACLE_HOME/patches
+    #       $ORACLE_HOME/OPatch/opatch apply -silent -oh $ORACLE_HOME {{ patch_number[0] }}
 
 
+    #       rm -rf $ORACLE_HOME/patches
+    #       EOORACLE
 
-          # Start DB instance
-          sqlplus / as sysdba <<EOSQL
-          startup;
-          exit;
-          EOSQL
+    #       #turn on  listener
+    #       su - {{ usergrid.stdout }} <<'EOGRIDSTART'
+    #       # Stop listener
+    #       lsnrctl start
 
-          # Start listener
-          lsnrctl start
-          EOORACLE
+    #       EOGRIDSTART
 
-          # Step 4: Clean up
-          rm -rf /opt/opsware/{{ oneoff_latest_zip }}
-          rm -rf /opt/opsware/{{ patch_number }}
-          '''
+    #       #turn on  listener
+    #       su - {{ oracle_user.stdout }} <<'EODBSTART'
+    #       # Start DB instance
+    #       sqlplus / as sysdba <<EOSQL
+    #       startup;
+    #       exit;
+    #       EOSQL
 
-          codeType = 'SH'  # Running a batch script that invokes PowerShell
+    #       EODBSTART
 
-          # Execute the script via OpenText Server Automation
-          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
 
-          print(f"Created job {jobRef.getId()}, waiting for completion...")
+    #       # Step 4: Clean up
+    #       rm -rf /opt/opsware/{{ patchname }}
+    #       '''
 
-          # Wait until the job completes
-          max_wait_time = 3600 
-          start_time = time.time()
+    #       codeType = 'SH'  # Running a batch script that invokes PowerShell
 
-          while True:
-              try:
-                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+    #       # Execute the script via OpenText Server Automation
+    #       jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+    #       print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+    #       # Wait until the job completes
+    #       max_wait_time = 7200 
+    #       start_time = time.time()
+
+    #       while True:
+    #           try:
+    #               job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
                             
-                  if job_info is None:
-                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
-                      break
+    #               if job_info is None:
+    #                   print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+    #                   break
 
-                  # Check if the job has finished
-                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
-                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
-                      break
+    #               # Check if the job has finished
+    #               if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+    #                   print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+    #                   break
 
-                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+    #               print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
                             
-              except Exception as e:
-                  print(f"Error retrieving job info: {e}")
-                  break
+    #           except Exception as e:
+    #               print(f"Error retrieving job info: {e}")
+    #               break
 
-              # Timeout condition
-              if time.time() - start_time > max_wait_time:
-                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
-                  break
+    #           # Timeout condition
+    #           if time.time() - start_time > max_wait_time:
+    #               print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+    #               break
 
-              time.sleep(10)  # Wait before checking again
-      register: result
-      loop: "{{ deviceid }}"
+    #           time.sleep(10)  # Wait before checking again
+    #   register: result
+    #   loop: "{{ deviceid }}"
+
+    - name: debug result
+      debug:
+        var: result
+
+    - name: "get oraclehome"
+      shell: sudo -u {{ oracle_user.stdout }} bash -c 'source ~/.bash_profile && echo $ORACLE_HOME'
+      register: orahome
+
+    - name: check orahome
+      debug:
+        var: orahome
+        
+   
 
     - name: Prerequisite --- download patch file
       command: "{{ ansible_python_interpreter }}"
@@ -278,91 +310,109 @@
         stdin: >
           from coglib import downloader;
 
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{oneoff_latest_zip_id}},None,None,'{{oneoff_latest_zip}}', None, '/opt/opsware'))
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{patchid}},None,None,'{{patchname}}', None, '/opt/opsware'))
       register: test
       tags: download,remote
 
+    - name: Ensure $ORACLE_HOME/patches directory exists
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; mkdir -p $ORACLE_HOME/patches'
+
+    - name: Unzip patch file to $ORACLE_HOME/patches
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; unzip -oq /opt/opsware/{{ patchname }} -d $ORACLE_HOME/patches'
+
     - name: "Step 26 --- Stop the named listeners"
-      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;lsnrctl stop' 
+      command: sudo -u {{ usergrid.stdout }} bash -c '. ~/.bash_profile;lsnrctl stop' 
         # when: "oracle_binary_version | splitVersion == '12'"
       tags:
         - patching
 
-    - name: "Shutdown Oracle Database using SQL*Plus"
-      ansible.builtin.shell: |
-        sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba <<EOF
-        shutdown immediate;
-        exit
-        EOF'
-      args:
-        executable: /bin/bash
-      register: shutdown_output
+    - name: Step 17 --- Create shutdown script for Oracle
+      copy:
+        dest: /opt/opsware/stopDatabase.sh
+        content: |
+          sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba' << EOF
+          shutdown immediate;
+          exit
+          EOF
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0750'
+
+    - name: Step 18 --- Shutdown Oracle database 
+      command: sh '/opt/opsware/stopDatabase.sh'
+      register: chkrslt
+    
+    - name: delete shutdown script file
+      file:
+        path: /opt/opsware/stopDatabase.sh
+        state: absent
+
+    - name: Step 23 b --- install patch
+      command: >
+        sudo -u {{ oracle_user.stdout }} bash -c ". ~/.bash_profile && $ORACLE_HOME/OPatch/opatch apply -oh $ORACLE_HOME -silent {{ orahome.stdout }}/patches/{{ patch_number[0] }}"
+      ignore_errors: yes
+      when: 
+        - "'RedHat' in ansible_distribution"
+
+
+    - name: "Step 24 --- verify patching"
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
+      register: chkpatch2
       tags:
-        - oracle_shutdown
+        - prep
 
-    # - name: "Step 28 --- Installing Quarterly Security Patch ({{ oneoff_patch_dir_int }})"
-    #   ansible.builtin.expect:
-    #     command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch apply' 
-    #     chdir: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_patch_dir_int }}/{{patchcode}}'
-    #     responses:
-    #       (?i)Email: ''
-    #       (?i)uninformed: 'Y'
-    #       (?i)proceed: 'y'
-    #       (?i)patching: 'y'
-    #     timeout: 1000
-    #   register: opatchOutput
-    #   tags:
-    #     - patching
-
-    - name: "Step 28 --- Installing Quarterly Security Patch ({{ oneoff_patch_dir_int }})"
-      ansible.builtin.command: >
-        sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; $ORACLE_HOME/OPatch/opatch apply -silent'
-      args:
-        chdir: '{{ oracle_home_path }}/patches/{{ oneoff_patch_dir }}/{{ oneoff_patch_dir_int }}/{{ patchcode }}'
-      register: opatchOutput
-      tags:
-        - patching
-
-    - name: "Step 29 --- Verify all patches have been applied successfully"
-      ansible.builtin.expect:
-        command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
-        chdir: '{{ oracle_home_path }}/OPatch'
-        responses:
-          (?i)proceed: 'y'
-      tags:
-        - patching
-
-    - name: "Step 30 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
-      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;lsnrctl start' 
-        #when: "oracle_binary_version | splitVersion == '12'"
+    - name: Step 25 --- check patching result
+      debug:
+        msg:
+          - "{{ chkpatch2 }}"
+   
+    - name: "Step 26 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
+      command: sudo -u {{ usergrid.stdout }} bash -c '. ~/.bash_profile;lsnrctl start' 
       tags:
         - patching
-        
-    - name: "Start Oracle Database using SQL*Plus"
-      ansible.builtin.shell: |
-        sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba <<EOF
-        startup
-        exit
-        EOF'
-      args:
-        executable: /bin/bash
-      register: startoutput
-      tags:
-        - oracle_start
 
-    - name: "Remove patchfile"
-      ansible.builtin.file:
-        path: /opt/opsware/{{ oneoff_latest_zip }}
+    - name: Step 27 ---  Create startup script for Oracle
+      copy:
+        dest: /opt/opsware/startDatabase.sh
+        content: |
+          sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba' << EOF
+          startup;
+          exit
+          EOF
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0750'
+
+    - name: Step 28 --- start Oracle database 
+      command: sh '/opt/opsware/startDatabase.sh'
+      register: chkrsltstart
+    
+    - name: delete startup script file
+      file:
+        path: /opt/opsware/startDatabase.sh
+        state: absent
+    
+    - name: Step 29 --- check start db
+      debug:
+        var: chkrsltstart
+      when: "'RedHat' in ansible_distribution"
+
+
+    - name: "Final --- Remove the Ansible patching directory"
+      file:
+        path: '{{ orahome.stdout }}/patches'
         state: absent
       tags:
-        - cleanup
-
-    - name: "Remove a directory and all its contents"
-      ansible.builtin.file:
-        path: /opt/opsware/{{ patch_number }}
+        - final
+        - post
+    - name: "Final --- Remove the Ansible patching file"
+      file:
+        path: '/opt/opsware/{{ patchname }}'
         state: absent
       tags:
-        - cleanup
+        - final
+        - post
+
 
         
         
