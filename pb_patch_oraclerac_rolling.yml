@@ -164,131 +164,131 @@
         msg: "Device ID: {{ item }}"
       loop: "{{ deviceid }}"
 
-    # - name: RAC Loop patching
-    #   shell: "{{ ansible_python_interpreter }} -"
-    #   args:
-    #     stdin: |
-    #       from pytwist.com.opsware.job import JobRef
-    #       import time
-    #       from pytwist import twistserver
-    #       from pytwist.com.opsware.script import ServerScriptJobArgs
-    #       from pytwist.com.opsware.server import ServerRef
+    - name: RAC Loop patching
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
 
-    #       # Authenticate to the TwistServer
-    #       ts = twistserver.TwistServer()
-    #       ts.authenticate("admin", "nh2123")
+          # Authenticate to the TwistServer
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "nh2123")
 
-    #       # Set up script execution arguments
-    #       args = ServerScriptJobArgs()
-    #       args.targets = [ServerRef({{ item }})]
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef({{ item }})]
 
-    #       args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
-    #       args.timeOut = 7200    # Timeout after 2 hrs
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 7200    # Timeout after 2 hrs
 
-    #       userTag = "adHoc SHELL script"
+          userTag = "adHoc SHELL script"
 
-    #       # PowerShell script to create and execute the Python script
-    #       source = '''
-    #       # Step 1: Download the patch using embedded Python
-    #       cat > /tmp/otsadownload.py <<EOF
-    #       from coglib import downloader
+          # PowerShell script to create and execute the Python script
+          source = '''
+          # Step 1: Download the patch using embedded Python
+          cat > /tmp/otsadownload.py <<EOF
+          from coglib import downloader
 
-    #       downloader.Tsunami().fetch_unit(
-    #           downloader.DownloadUnit({{ patchid }}, None, None, '{{ patchname }}', None, '/opt/opsware')
-    #       )
-    #       EOF
+          downloader.Tsunami().fetch_unit(
+              downloader.DownloadUnit({{ patchid }}, None, None, '{{ patchname }}', None, '/opt/opsware')
+          )
+          EOF
 
-    #       /opt/opsware/agent/bin/python3 /tmp/otsadownload.py
-    #       rm -f /tmp/otsadownload.py
+          /opt/opsware/agent/bin/python3 /tmp/otsadownload.py
+          rm -f /tmp/otsadownload.py
            
 
-    #       #shut off listener
-    #       su - {{ usergrid.stdout }} <<'EOGRIDSTOP'
-    #       # Stop listener
-    #       lsnrctl stop
+          #shut off listener
+          su - {{ usergrid.stdout }} <<'EOGRIDSTOP'
+          # Stop listener
+          lsnrctl stop
 
-    #       EOGRIDSTOP
+          EOGRIDSTOP
 
-    #        # Step 3: Switch to oracle user and perform the patching sequence
-    #       su - {{ oracle_user.stdout }} <<'EOORACLE'
+           # Step 3: Switch to oracle user and perform the patching sequence
+          su - {{ oracle_user.stdout }} <<'EOORACLE'
         
-    #       mkdir $ORACLE_HOME/patches
-    #       unzip -o /opt/opsware/{{ patchname }} -d $ORACLE_HOME/patches
+          mkdir $ORACLE_HOME/patches
+          unzip -o /opt/opsware/{{ patchname }} -d $ORACLE_HOME/patches
 
-    #       # Shut down DB instance
-    #       sqlplus / as sysdba <<EOSQL
-    #       shutdown immediate;
-    #       exit;
-    #       EOSQL
+          # Shut down DB instance
+          sqlplus / as sysdba <<EOSQL
+          shutdown immediate;
+          exit;
+          EOSQL
 
-    #       # Apply the patch
-    #       cd $ORACLE_HOME/patches
-    #       $ORACLE_HOME/OPatch/opatch apply -silent -oh $ORACLE_HOME {{ patch_number[0] }}
-
-
-    #       rm -rf $ORACLE_HOME/patches
-    #       EOORACLE
-
-    #       #turn on  listener
-    #       su - {{ usergrid.stdout }} <<'EOGRIDSTART'
-    #       # Stop listener
-    #       lsnrctl start
-
-    #       EOGRIDSTART
-
-    #       #turn on  listener
-    #       su - {{ oracle_user.stdout }} <<'EODBSTART'
-    #       # Start DB instance
-    #       sqlplus / as sysdba <<EOSQL
-    #       startup;
-    #       exit;
-    #       EOSQL
-
-    #       EODBSTART
+          # Apply the patch
+          cd $ORACLE_HOME/patches
+          $ORACLE_HOME/OPatch/opatch apply -silent -oh $ORACLE_HOME {{ patch_number[0] }}
 
 
-    #       # Step 4: Clean up
-    #       rm -rf /opt/opsware/{{ patchname }}
-    #       '''
+          rm -rf $ORACLE_HOME/patches
+          EOORACLE
 
-    #       codeType = 'SH'  # Running a batch script that invokes PowerShell
+          #turn on  listener
+          su - {{ usergrid.stdout }} <<'EOGRIDSTART'
+          # Stop listener
+          lsnrctl start
 
-    #       # Execute the script via OpenText Server Automation
-    #       jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+          EOGRIDSTART
 
-    #       print(f"Created job {jobRef.getId()}, waiting for completion...")
+          #turn on  listener
+          su - {{ oracle_user.stdout }} <<'EODBSTART'
+          # Start DB instance
+          sqlplus / as sysdba <<EOSQL
+          startup;
+          exit;
+          EOSQL
 
-    #       # Wait until the job completes
-    #       max_wait_time = 7200 
-    #       start_time = time.time()
+          EODBSTART
 
-    #       while True:
-    #           try:
-    #               job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+
+          # Step 4: Clean up
+          rm -rf /opt/opsware/{{ patchname }}
+          '''
+
+          codeType = 'SH'  # Running a batch script that invokes PowerShell
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 7200 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
                             
-    #               if job_info is None:
-    #                   print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
-    #                   break
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
 
-    #               # Check if the job has finished
-    #               if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
-    #                   print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
-    #                   break
+                  # Check if the job has finished
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
 
-    #               print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
                             
-    #           except Exception as e:
-    #               print(f"Error retrieving job info: {e}")
-    #               break
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
 
-    #           # Timeout condition
-    #           if time.time() - start_time > max_wait_time:
-    #               print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
-    #               break
+              # Timeout condition
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
 
-    #           time.sleep(10)  # Wait before checking again
-    #   register: result
-    #   loop: "{{ deviceid }}"
+              time.sleep(10)  # Wait before checking again
+      register: result
+      loop: "{{ deviceid }}"
 
     - name: debug result
       debug:
