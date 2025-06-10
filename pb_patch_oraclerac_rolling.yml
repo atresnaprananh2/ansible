@@ -7,6 +7,7 @@
   vars:
     - dest: C:\Temp
     - dest2: C:\
+    - isupdateopatch: "N"
   tasks:
 
     - name: Preparation - Get Software Policy Attr
@@ -83,6 +84,10 @@
     - name: "get user grid"
       shell: ps -eo user,args | grep -E "crsd\.bin|ocssd\.bin|evmd\.bin" | grep -v grep | awk '{print $1}' | sort | uniq | grep -v root 
       register: usergrid
+
+    - name: "get oraclehome"
+      shell: sudo -u {{ oracle_user.stdout }} bash -c 'source ~/.bash_profile && echo $ORACLE_HOME'
+      register: orahome
      
    
     
@@ -189,6 +194,26 @@
 
           # PowerShell script to create and execute the Python script
           source = '''
+          {% if isupdateopatch == "Y" %}
+          # Step 0: Download latest OPatch using embedded Python
+          cat > /tmp/opatchdownload.py <<EOF
+          from coglib import downloader
+
+          downloader.Tsunami().fetch_unit(
+              downloader.DownloadUnit({{ opatchid }}, None, None, '{{ opatchname }}', None, '/opt/opsware')
+          )
+          EOF
+
+          /opt/opsware/agent/bin/python3 /tmp/opatchdownload.py
+          rm -f /tmp/opatchdownload.py
+
+          # Step 0.1: Replace old OPatch
+          su - {{ oracle_user.stdout }} <<'EOOPATCH'
+          mv {{ orahome.stdout }}/OPatch {{ orahome.stdout }}/OPatch_bak
+          unzip -o /opt/opsware/{{ opatchname }} -d {{ orahome.stdout }}
+          EOOPATCH
+          {% endif %}
+
           # Step 1: Download the patch using embedded Python
           cat > /tmp/otsadownload.py <<EOF
           from coglib import downloader
@@ -294,13 +319,47 @@
       debug:
         var: result
 
-    - name: "get oraclehome"
-      shell: sudo -u {{ oracle_user.stdout }} bash -c 'source ~/.bash_profile && echo $ORACLE_HOME'
-      register: orahome
+ 
 
     - name: check orahome
       debug:
         var: orahome
+
+    - name: Prerequisite --- download opatch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ opatchid }},None,None,'{{ opatchname }}', None, '/opt/opsware'))
+      register: test
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags: download,remote
+    
+    - name: Step 11 --- rename opatch dir
+      command: "mv {{ orahome.stdout }}/OPatch {{ orahome.stdout }}/OPatch_bak"
+      #when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags:
+        - prep
+
+    - name: Step 12 --- Install the latest OPatch ({{ opatch_latest_zip }})
+      ansible.builtin.unarchive:
+        src: '/opt/opsware/{{ opatchname }}'
+        dest: '{{ orahome.stdout }}'
+        remote_src: yes
+        keep_newer: true 
+        owner: oracle
+      #when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
+      when: 
+        - "'RedHat' in ansible_distribution"
+        - isupdateopatch == "Y"
+      tags:
+        - prep
         
    
 

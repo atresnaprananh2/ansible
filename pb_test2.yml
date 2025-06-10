@@ -1,27 +1,7 @@
-- name: Extract OPatch version from Oracle patch README
-  hosts: oracle12
-  remote_user: root
-  become: true
-  become_user: root
-  vars:
-    patch_zip: "/tmp/p6880880_132000_Linux-x86-64.zip"
-    extract_path: "/opt/opsware/testpatch/p30463660/30463660"
-    patchingdir: "/opt/opsware"
-    patchcodes: "p30463660"
-    patch_number: "30463660"
+- name: Get hostname of Linux servers
+  hosts: all
+  gather_facts: yes
   tasks:
-
-    - name: Find patch directories 
-      find:
-        paths: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number }}"
-        file_type: directory
-        recurse: no
-      register: patch_dirs
-
-    - name: Extract only directory names 
-      set_fact:
-        patch_folder_names: "{{ patch_dirs.files | map(attribute='path') | map('basename') | list }}"
-
-    - name: Show patch folder names
+    - name: Show the hostname
       debug:
-        msg: "{{ patch_folder_names }}"
+        msg: "The hostname is {{ ansible_hostname }}"

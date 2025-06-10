@@ -7,6 +7,8 @@
   vars:
     - isupdateopatch: "N"
     - readmecontent: ""
+    - oraclehomeinfosol: ""
+    - oraclehomeinforhel: ""
   tasks:
     - name: Preparation - Get Software Policy Attr
       shell: |
@@ -37,12 +39,12 @@
       register: instattr
       args:
         chdir: '/opt/opsware/agent/bin'
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
     
     - name:  Preparation - setcustattr
       set_fact:
         custattr: "{{ instattr.stdout }}"
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name:  Preparation - set variables
       set_fact:
@@ -51,14 +53,14 @@
         patchid: "{{ custattr.oracle_patchid }}"
         isupdateopatch: "{{ custattr.isupdateopatch }}"
 
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name:  Preparation - set variables to update opatch
       set_fact:
         opatchname: "{{ custattr.oracle_opatchname }}"
         opatchid: "{{ custattr.oracle_opatchid }}"
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
 
    
@@ -67,81 +69,80 @@
     - name: Discovery - Get Oracle User
       shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
       register: oracle_user
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Discovery - Find the path oracle home  (linux)
       command: grep -E '^[^#]' /etc/oratab
-      register: oraclehomeinfo
+      register: oraclehomeinforhel
       args:
         chdir: '/var/lib'
       when: "'RedHat' in ansible_distribution"
-
-    - name: Discovery - check latest version  (linux)
-      debug:
-        var: oraclehomeinfo.stdout.split(':')[1]
-      when: "'RedHat' in ansible_distribution"
+    
+    - name: Discovery - Find the path oracle home  (linux)
+      command: egrep '^[^#]' /var/opt/oracle/oratab
+      register: oraclehomeinfosol
+      args:
+        chdir: '/var/lib'
+      when: "'Solaris' in ansible_distribution"
 
     
-    - name: Discovery - Set fact oratab (linux)
+    - name: Discovery - Set fact oratab (rhel)
       set_fact:
-        oracle_home_path: "{{ oraclehomeinfo.stdout.split(':')[1] }}"
-        instance: "{{ oraclehomeinfo.stdout.split(':')[0] }}"
-        autorun: "{{ oraclehomeinfo.stdout.split(':')[2] }}"
-        byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
-        osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
+        oracle_home_path: "{{ oraclehomeinforhel.stdout.split(':')[1] }}"       
       when: "'RedHat' in ansible_distribution"
+
+    - name: Discovery - Set fact oratab (sol)
+      set_fact:
+        oracle_home_path: "{{ oraclehomeinfosol.stdout.split(':')[1] }}"
+      when: "'Solaris' in ansible_distribution"
 
     - name: Preparation - set patching dir
       set_fact:
         patchingdir: "/opt/opsware"
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
   
 
     - name: "Discovery - Get Oracle Version"
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
       register: oracleversion
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
     
-    - name: Discovery - check oracle version  (linux)
-      debug:
-        var:   " oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') "
-      when: "'RedHat' in ansible_distribution"
+   
 
     - name: "Discovery - Get Opatch Version"
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/OPatch/opatch version'
       register: opatchversion
-      when: "'RedHat' in ansible_distribution"
-
-    - name: Discovery - check opatch version  (linux)
-      debug:
-        var: "opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '')"
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
   
     - name: Preparation - Set fact version (linux)
       set_fact:
         oraver: "{{ oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') }}"
         opatchver: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Preparation - Extract major Oracle version
       set_fact:
         oracle_binary_version: "{{ oraver | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
         opatch_version_int: '{{ opatchver | replace(".", "") }}'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Preparation - get binary version
       set_fact:
         oracle_binary_version_int: '{{ oracle_binary_version | replace(".", "") }}'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     
     - name: Discovery - Run ps command and grep for tnslsnr
       shell: ps -ef | grep tnslsnr | grep -v grep
       register: ps_output
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Discovery - Extract tnslsnr path
       shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
       register: tnslsnr_path
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Discovery - Display tnslsnr executable path without newline
       debug:
@@ -151,15 +152,17 @@
           {% else %}
             tnslsnr executable not found.
           {% endif %}
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Discovery - Extract listener name from process details
       set_fact:
         listenername: "{{ ps_output.stdout | regex_search('tnslsnr\\s+(\\S+)') | replace('tnslsnr ', '') | trim }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Discovery - Display listener name
       debug:
         msg: "The Oracle listener name is: {{ listenername }}"
-
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
     #end of discovery
 
     - name: Prerequisite --- download patch file
@@ -171,6 +174,7 @@
           downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '{{ patchingdir }}'))
       register: test
       tags: download,remote
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
 
     - name: Prerequisite --- download opatch file
@@ -182,7 +186,7 @@
           downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ opatchid }},None,None,'{{ opatchname }}', None, '{{ patchingdir }}'))
       register: test
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
       tags: download,remote
 
@@ -190,12 +194,14 @@
       set_fact:
         patchcodes: "{{ patchname | regex_search('^p[0-9]+') }}"
         patch_number: "{{ patchname | regex_search('p([0-9]+)', '\\1') }}"
-    
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+
     - name: Prerequisite --- Check if directory exists, if not create it
       ansible.builtin.file:
         path: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
         state: directory
-        mode: '0755' 
+        mode: '0755'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution" 
 
     
     - name: "Step 1 --- unzip patch"
@@ -205,6 +211,7 @@
         list_files: yes
         owner: "{{ oracle_user.stdout }}"
         remote_src: yes
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - debug
         - prep
@@ -214,6 +221,7 @@
         file_type: any
         depth: 1
       register: patch_content
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Set patch type
       set_fact:
@@ -224,11 +232,12 @@
               | select('match', '^[0-9]+$')
               | list %}
           {{ 'multiple' if (patch_dirs | length > 0) else 'single' | trim | lower }}
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Check patchtype
       debug:
         var: patch_type
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
 
     - name: Step 2 --- Find README file
@@ -238,14 +247,14 @@
         file_type: file
       register: readme_files
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
 
     - name: Step 3 --- Extract readme content
       set_fact:
         readmecontent: "{{ readme_files.matched }}"
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
     
 
@@ -255,7 +264,7 @@
       register: readme_content
       when: 
         - readmecontent | length > 0
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
       
 
@@ -264,7 +273,7 @@
         opatch_required: "{{ (readme_content.content | b64decode).splitlines() | select('match', '.*[oO][pP]atch.*[vV]ersion.*') | list | default('NA') }}"
       when: 
         - readmecontent | length > 0
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
 
 
@@ -275,7 +284,7 @@
         - debug
         - prep
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
 
     - name: "Step 7 --- Find the OPatch directory"
@@ -284,7 +293,7 @@
         state: directory
       register: opatch_dir_check
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
       tags:
         - prep
@@ -292,18 +301,21 @@
     - name: "Step 8 --- Check the system version of OPatch"
       command: "sudo -u oracle bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch version'"
       register: system_opatch_version
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - prep
 
     - name: "Step 9 --- Parse system_opatch_version output register to contain only necessary characters"
       set_fact:
         system_opatch_version: '{{ system_opatch_version.stdout_lines[0] | replace("OPatch Version: ", "") }}'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - prep
         
     - name: "Step 10 --- Print the parsed system value of OPatch version"
       debug:
         msg: "The systems's value of the OPatch version is {{ system_opatch_version }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - debug
         - prep
@@ -312,7 +324,7 @@
       command: "mv {{ oracle_home_path }}/OPatch {{ oracle_home_path }}/OPatch_bak"
       #when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
       tags:
         - prep
@@ -326,7 +338,7 @@
         owner: oracle
       #when: (system_opatch_version is version_compare(minimum_required_opatch_version, '<'))
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - isupdateopatch == "Y"
       tags:
         - prep
@@ -334,6 +346,7 @@
     - name: "Step 13 --- Obtain the list of patches installed in current $ORACLE_HOME"
       command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
       register: chkpatch
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - prep
 
@@ -341,11 +354,13 @@
       debug:
         msg:
           - "{{ chkpatch }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: "Step 15 --- Identify all of the running listeners"
       shell: ps -ef | grep lsnr
       changed_when: no
       register: listenerOutput
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - patching
       
@@ -355,6 +370,7 @@
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl stop {{ listenername }}' 
       tags:
         - patching
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Step 17 --- Create shutdown script for Oracle
       copy:
@@ -365,36 +381,43 @@
           exit
           EOF
         owner: "{{ oracle_user.stdout }}"
+        when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         group: oinstall
         mode: '0750'
 
     - name: Step 18 --- Shutdown Oracle database 
       command: sh '/opt/opsware/stopDatabase.sh'
       register: chkrslt
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
     
     - name: delete shutdown script file
       file:
         path: /opt/opsware/stopDatabase.sh
         state: absent
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Step 19 --- Show patching dirs
       debug:
         msg: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
-    
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+
     - name: Step 20 --- ind patch directories 
       find:
         paths: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
         file_type: directory
         recurse: no
       register: patch_dirs
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Step 21 ---  Extract only directory names 
       set_fact:
         patch_folder_names: "{{ patch_dirs.files | map(attribute='path') | map('basename') | list }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Step 22 ---  Show patch folder names
       debug:
         msg: "{{ patch_folder_names }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     
     - name: Step 23 a --- install patch
@@ -404,7 +427,7 @@
       args:
         chdir: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - patch_type == "multiple"
 
     - name: Step 23 b --- install patch
@@ -413,7 +436,7 @@
       args:
         chdir: "{{ patchingdir }}/{{ patchcodes }}"
       when: 
-        - "'RedHat' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         - patch_type == "single"
         
 
@@ -421,6 +444,7 @@
     - name: "Step 24 --- verify patching"
       command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch lsinventory' 
       register: chkpatch2
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - prep
 
@@ -428,9 +452,11 @@
       debug:
         msg:
           - "{{ chkpatch2 }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
    
     - name: "Step 26 --- Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oracle_home_path }}/bin/lsnrctl start {{ listenername }}' 
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - patching
 
@@ -445,26 +471,30 @@
         owner: "{{ oracle_user.stdout }}"
         group: oinstall
         mode: '0750'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Step 28 --- start Oracle database 
       command: sh '/opt/opsware/startDatabase.sh'
       register: chkrsltstart
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
     
     - name: delete startup script file
       file:
         path: /opt/opsware/startDatabase.sh
         state: absent
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
     
     - name: Step 29 --- check start db
       debug:
         var: chkrsltstart
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
 
     - name: "Final --- Remove the Ansible patching directory"
       file:
         path: '{{ patchingdir }}/{{ patchcodes }}'
         state: absent
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - final
         - post
@@ -472,6 +502,7 @@
       file:
         path: '{{ patchingdir }}/{{ patchname }}'
         state: absent
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
       tags:
         - final
         - post
