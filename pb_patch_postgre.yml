@@ -2,7 +2,7 @@
   gather_facts: yes
   name: Patch postgresql
   vars:
-    dest: /var/lib
+    dest: /opt/opsware
     service_pattern: postgresql
   tasks:
     - name: Gather system facts
@@ -67,7 +67,7 @@
       command: which psql
       register: psql_path
       args:
-        chdir: '/var/lib'
+        chdir: '/opt/opsware'
       when: "'RedHat' in ansible_distribution"
 
 
@@ -75,7 +75,7 @@
       command: readlink -f "{{ psql_path.stdout }}"
       register: binpathpsql
       args:
-        chdir: '/var/lib'
+        chdir: '/opt/opsware'
       when: "'RedHat' in ansible_distribution"
 
     - name: Set fact base dir (linux)
@@ -152,26 +152,26 @@
         stdin: >
           from coglib import downloader;
 
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ postgrepatchid }},None,None,'{{ postgrepatchname }}', None, '/tmp'))
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ postgrepatchid }},None,None,'{{ postgrepatchname }}', None, '/opt/opsware'))
       register: test
       when: "'RedHat' in ansible_distribution"   
       tags: download,remote
 
     - name: Extract patch data
-      command: tar -xzf /tmp/{{ postgrepatchname }} -C /tmp/
+      command: tar -xzf /tmp/{{ postgrepatchname }} -C /opt/opsware/
       when: "'RedHat' in ansible_distribution"
     
     - name: configure installer
       shell: ./configure --prefix={{ basedirpg }} --without-icu
       register: chk2
       args:
-        chdir: '/tmp/{{ postgrefolder }}'
+        chdir: '/opt/opsware/{{ postgrefolder }}'
       when: "'RedHat' in ansible_distribution"
 
     - name: make file 
       command: make
       args:
-        chdir: '/tmp/{{ postgrefolder }}'
+        chdir: '/opt/opsware/{{ postgrefolder }}'
       when: "'RedHat' in ansible_distribution"
      
 
@@ -179,7 +179,7 @@
       command: make install
       register: chkins
       args:
-        chdir: '/tmp/{{ postgrefolder }}'
+        chdir: '/opt/opsware/{{ postgrefolder }}'
       when: "'RedHat' in ansible_distribution"
     
     - name: chk configure
@@ -255,7 +255,7 @@
       set_fact:
         postgrepatchnamewin: "{{ custattrwin.postgresql_patchname }}"
         postgrepatchidwin: "{{ custattrwin.postgresql_patchid }}"
-        userdir: "C:/Users/Administrator/"
+        userdir: "C:/Program Files/Opsware/"
       when: "'Windows' in ansible_distribution"
     
     
@@ -331,7 +331,7 @@
 
     - name: Backup PostgreSQL data directory (windows)
       win_command: >
-        powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\PostgreSQL_Backup' -Recurse"
+        powershell -command "Copy-Item -Path '{{ datadir }}' -Destination 'C:\Program Files\Opsware\PostgreSQL_Backup' -Recurse"
       when: "'Windows' in ansible_distribution"
 
     
@@ -347,7 +347,7 @@
         var: install_output
       when: "'Windows' in ansible_distribution"
 
-    - name: Start PostgreSQL 15 service (windows)
+    - name: Start PostgreSQL service (windows)
       win_service:
         name: "{{ serviceid }}"
         state: started

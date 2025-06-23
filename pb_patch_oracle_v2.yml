@@ -1,14 +1,14 @@
-- hosts: oracle19test2
+- hosts: oracle19
   gather_facts: true
   remote_user: root
   become: true
   become_user: root
   name: Oracle Patching started...
   vars:
-    - isupdateopatch: "N"
-    - readmecontent: ""
-    - oraclehomeinfosol: ""
-    - oraclehomeinforhel: ""
+    isupdateopatch: "N"
+    readmecontent: ""
+    oraclehomeinfosol: ""
+    oraclehomeinforhel: ""
   tasks:
     - name: Preparation - Get Software Policy Attr
       shell: |
@@ -381,9 +381,9 @@
           exit
           EOF
         owner: "{{ oracle_user.stdout }}"
-        when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
         group: oinstall
         mode: '0750'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
 
     - name: Step 18 --- Shutdown Oracle database 
       command: sh '/opt/opsware/stopDatabase.sh'

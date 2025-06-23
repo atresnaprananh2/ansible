@@ -1,6 +1,9 @@
-- hosts: all
+- hosts: rhel8001
   gather_facts: yes
   name: System Discovery
+  become: true
+  remote_user: root
+  become_user: root
   vars:   
     db2fixpack: 'NA'
   tasks:
@@ -84,7 +87,7 @@
     
     - name: Show Db2 Home path
       ansible.builtin.debug:
-        var: db2_home
+        var: db2installationpath.stdout
       when: "'RedHat' in ansible_distribution"
 
     - name: Get Db2 root free space

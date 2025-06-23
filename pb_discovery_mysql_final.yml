@@ -143,13 +143,15 @@
     
     - name: Clean spaces
       set_fact:
-        mysqlportcln: "{{ mysql_port.stdout_lines | replace(' ', '') }}"
+        mysqlportcln: "{{ mysql_port.stdout_lines | join('') | replace(' ', '') }}"
       when: "'RedHat' in ansible_distribution"
 
 
-    - name: Set default MySQL port if not found
+    - name: Extract or default MySQL port
       set_fact:
-        mysql_port_value: "{{ mysqlportcln | regex_search('port=([0-9]+)', '\\1') | default('3306') }}"
+        mysql_port_value: >-
+          {% set match = mysqlportcln | regex_search('port=([0-9]+)', '\\1') %}
+          {{ match if match is not none and match != '' else '3306' }}
       when: "'RedHat' in ansible_distribution"
 
     - name: Display MySQL port
@@ -295,39 +297,47 @@
     #   when: "'RedHat' in ansible_distribution"
 
 
-    - name: test3
+    - name: chkrouterinfo
       debug:
         var: routerinfo
       when: "'RedHat' in ansible_distribution"
-    - name: test4
+    - name: chkshellinfo
       debug:
         var: shellinfo
       when: "'RedHat' in ansible_distribution"
-    - name: test4
+    - name: chkport
       debug:
         var: mysql_port_value[0]
       when: "'RedHat' in ansible_distribution"
     
-    - name: test4
+    - name: chk dbconcat
       debug:
         var: dbconcat
       when: "'RedHat' in ansible_distribution"
     
-    - name: test4
+    - name: check dbsize
       debug:
         var: mysql_database_size.stdout 
       when: "'RedHat' in ansible_distribution"
-    - name: test4
+    - name: check version
       debug:
         var: mysql_version[0]
       when: "'RedHat' in ansible_distribution"
-    - name: test4
+    - name: check data dir
       debug:
         var:  datadirlnx[0]
       when: "'RedHat' in ansible_distribution"
-    - name: test4
+    - name: check basedir
       debug:
         var:  basedirlnx
+      when: "'RedHat' in ansible_distribution"
+    - name: check size
+      debug:
+        var:  mysql_database_size.stdout
+      when: "'RedHat' in ansible_distribution"
+    - name: checkip
+      debug:
+        var:  ansible_facts['default_ipv4']['address']
       when: "'RedHat' in ansible_distribution"
 
     - name: Push custom attributes to selected server

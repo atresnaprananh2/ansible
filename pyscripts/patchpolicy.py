@@ -1,51 +1,51 @@
-from pytwist import twistserver
-from pytwist.com.opsware.server import ServerRef
-from pytwist.com.opsware.job import RepairPatchPolicyInput
+from pytwist import * 
 
-# Configuration
-USERNAME = "admin"
-PASSWORD = "opsware_admin"
-SERVER_NAME = "solarisips"
-POLICY_NAME = "ipspolicy"
-POLICY_FOLDER = "/Opsware/Tools/ipspolicy"
+from pytwist.com.opsware.swmgmt import *
+from pytwist.com.opsware.pkg import *
+from pytwist.com.opsware.search import Filter
+import json
 
-# Connect and authenticate
+
 ts = twistserver.TwistServer()
-ts.authenticate(USERNAME, PASSWORD)
+ts.authenticate("admin", "opsware_admin")
 
-# Get the server reference
+SoftwarePolicyService= ts.swmgmt.SoftwarePolicyService
+PatchPolicyService= ts.swmgmt.PatchPolicyService
 server_service = ts.server.ServerService
-servers = server_service.findServers(f"name CONTAINS \"{SERVER_NAME}\"")
+policy_name = "ipspolicy"
 
-if not servers:
-    raise Exception(f"No server found with name {SERVER_NAME}")
+policylist = SoftwarePolicyService.findSoftwarePolicyRefs(Filter())
+servers = server_service.findServerRefs(Filter())
+packages = []
 
-server_ref = servers[0]
-print(f"Found server: {server_ref}")
+for pol in policylist:
+    policy_vos = SoftwarePolicyService.getSoftwarePolicyVO(pol)
+    if policy_vos.name == policy_name:
+       print(policy_vos.name + "-" + str(policy_vos.ref.id))
+       for srv in servers:
+           server_vo = server_service.getServerVO(srv)
+           if server_vo.primaryIP == "172.19.0.150":
+              print(server_vo.mid)
+              for i in range(len(policy_vos.installableItemData)):
+                  package = {
+                      "file_name": policy_vos.installableItemData[i].policyItem.name,
+                      "object_id": policy_vos.installableItemData[i].policyItem.id
+                  }
+                  packages.append(package)
+             
+              break
+       break
+json_output = json.dumps(packages, indent=2)
+print(json_output)
 
-# Get the patch policy reference
-folder_service = ts.folder.FolderService
-patch_service = ts.patch.PatchPolicyService
 
-folder = folder_service.getFolderByPath(POLICY_FOLDER)
-policies = patch_service.getPatchPoliciesInFolder(folder)
+       
+       
+       
 
-policy_ref = next((p for p in policies if p.name == POLICY_NAME), None)
 
-if not policy_ref:
-    raise Exception(f"No patch policy named '{POLICY_NAME}' found in folder {POLICY_FOLDER}")
 
-print(f"Found patch policy: {policy_ref}")
 
-# Attach the policy to the server
-patch_service.assignPatchPolicy(policy_ref, [server_ref])
-print(f"Assigned policy '{POLICY_NAME}' to server '{SERVER_NAME}'")
 
-# Start remediation job
-job_service = ts.job.JobService
-remediation_input = RepairPatchPolicyInput()
-remediation_input.deviceRefs = [server_ref]
-remediation_input.patchPolicyRef = policy_ref
 
-job_ref = job_service.startRepairPatchPolicy(remediation_input)
-print(f"Remediation job started: Job ID = {job_ref.id}")
+

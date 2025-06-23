@@ -255,7 +255,7 @@
       set_fact:
         postgrepatchnamewin: "{{ custattrwin.postgresql_patchname }}"
         postgrepatchidwin: "{{ custattrwin.postgresql_patchid }}"
-        userdir: "C:/Program Files/Opsware"
+        userdir: "C:/Program Files/Opsware/"
       when: "'Windows' in ansible_distribution"
     
     

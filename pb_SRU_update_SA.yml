@@ -1,0 +1,232 @@
+- name: Configure SRU 80 IPS repository on Solaris
+  hosts: oraclesol
+  gather_facts: true
+  become: true
+  remote_user: root
+  become_user: root
+  vars:
+    destdownload: "/opt/opsware"
+    ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+    sacoreid: 10001
+  tasks:
+    # - name: check the SA solpatch import output for the server
+    #   ansible.builtin.command: /opt/opsware/solpatch_import/bin/solpatch_import -a show --filter="rec,server={{ ansible_facts.hostname }}"
+    #   register: chkoutput
+    
+    # - name: chk val
+    #   debug:
+    #     var: chkoutput.stdout
+
+    # - name: Get SA Core Slice name for the current host
+    #   run_once: true
+    #   shell: "{{ ansible_python_interpreter }} -"
+    #   args:
+    #     stdin: |
+    #       from pytwist import *
+    #       from pytwist.com.opsware.search import Filter
+    #       from pytwist import twistserver
+    #       import json
+
+    #       ts = twistserver.TwistServer()
+    #       ts.authenticate("admin", "opsware_admin")
+
+    #       server_service = ts.server.ServerService
+
+    #       # Get all servers
+    #       servers = server_service.findServerRefs(Filter())
+
+    #       # Match short hostname from ansible
+    #       secondary = '{{ ansible_facts.hostname }}'
+
+    #       for srv in servers:
+    #           server_vo = server_service.getServerVO(srv)
+    #           short_name = server_vo.name.split('.')[0]
+    #           if short_name == secondary:
+    #               print(server_vo.getRealm().__dict__)
+    #               break
+    #   register: getsvrmid
+    #   changed_when: false
+
+    # - name: debug result
+    #   debug:
+    #     var: getsvrmid
+
+    - name: set software policy from SACore
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
+
+          # Authenticate to the TwistServer
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "opsware_admin")
+
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef({{ sacoreid }})]
+
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 7200    # Timeout after 2 hrs
+
+          userTag = "adHoc SHELL script"
+
+          # Shell script path to execute
+          source = """/opt/opsware/solpatch_import/bin/solpatch_import -a policy --policy_path='/Opsware/Tools/ipspolicy{{ ansible_facts.hostname }}' --filter='rec,server={{ ansible_facts.hostname }}'"""
+
+          codeType = 'SH'
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 7200 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
+
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
+
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
+
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
+
+              time.sleep(10)
+      register: resultjob
+
+    - name: debug result
+      debug:
+        var: resultjob
+
+    
+
+    - name: Get IPS policy package list as JSON
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: |
+          from pytwist import *
+          from pytwist.com.opsware.swmgmt import *
+          from pytwist.com.opsware.pkg import *
+          from pytwist.com.opsware.search import Filter
+          import json
+
+          ts = twistserver.TwistServer()
+          ts.authenticate("admin", "opsware_admin")
+
+          SoftwarePolicyService = ts.swmgmt.SoftwarePolicyService
+          PatchPolicyService = ts.swmgmt.PatchPolicyService
+          server_service = ts.server.ServerService
+          policy_name = "ipspolicy{{ansible_facts.hostname}}"
+
+          policylist = SoftwarePolicyService.findSoftwarePolicyRefs(Filter())
+          servers = server_service.findServerRefs(Filter())
+          packages = []
+
+          for pol in policylist:
+              policy_vos = SoftwarePolicyService.getSoftwarePolicyVO(pol)
+              if policy_vos.name == policy_name:
+                  print(policy_vos.name + "-" + str(policy_vos.ref.id))
+                  for srv in servers:
+                      server_vo = server_service.getServerVO(srv)
+                      if server_vo.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}":
+                          print(server_vo.mid)
+                          for i in range(len(policy_vos.installableItemData)):
+                              package = {
+                                  "file_name": policy_vos.installableItemData[i].policyItem.name,
+                                  "object_id": policy_vos.installableItemData[i].policyItem.id
+                              }
+                              packages.append(package)
+                          break
+                  break
+
+          json_output = json.dumps(packages, indent=2)
+          print(json.dumps(packages))
+      register: policy_output
+      tags: download,remote
+
+    - name: chk val 3
+      debug:
+        var: policy_output.stdout
+    
+    - name: Split stdout lines and extract JSON block
+      set_fact:
+        policy_lines: "{{ policy_output.stdout_lines }}"
+    - name: Split stdout lines and extract JSON block
+      set_fact:
+        patch_list: "{{ policy_lines[2] | from_json }}"
+
+    - name: chk val 3
+      debug:
+        var: patch_list
+
+
+    - name: Ensure patch dir temp exist
+      file:
+        path: /tmp/SRUPatch
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Download patch files using Tsunami
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(
+            downloader.DownloadUnit({{ item.object_id }}, None, None, '{{ item.file_name }}', None, '/tmp/SRUPatch')
+          )
+      loop: "{{ patch_list }}"
+      loop_control:
+        label: "{{ item.file_name }}"
+
+      
+    - name: ensure all pkg are valid
+      ansible.builtin.command: pkgsend generate /tmp/SRUPatch | pkgfmt
+      register: chkoutput3
+
+    - name: chk val 3
+      debug:
+        var: chkoutput3.stdout
+
+    - name: send pkg to srudir
+      ansible.builtin.command: pkgsend -s /IPS/repo/11.4.80/ publish -d /tmp/SRUPatch --batch
+      register: chkoutput4
+
+    - name: chk val 4
+      debug:
+        var: chkoutput4.stdout
+
+    - name: refresh repo
+      ansible.builtin.command: pkgrepo refresh -s /IPS/repo/11.4.80/
+      register: chkoutput5
+
+    - name: chk val 5
+      debug:
+        var: chkoutput5.stdout
+
+    - name: Delete a directory on the target server
+      ansible.builtin.file:
+        path: /tmp/SRUPatch
+        state: absent
+   
+    

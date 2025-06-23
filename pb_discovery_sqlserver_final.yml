@@ -1,5 +1,5 @@
 - name: Get SQL Server version from Windows Registry
-  hosts: all  # Replace with your actual Windows host group winsqlservercls1
+  hosts: mysqlwin5  # Replace with your actual Windows host group winsqlservercls1
   gather_facts: yes
   vars:
     isCluster: "NA"
@@ -30,8 +30,16 @@
         var: isCluster
 
     - set_fact:
+        ipaddr: "{{ ansible_facts.interfaces | selectattr('connection_name', 'search', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkcluster.failed == false
+    
+    - set_fact:
         ipaddr: "{{ ansible_facts.interfaces | selectattr('connection_name', 'equalto', 'Ethernet0') | map(attribute='ipv4.address') | first }}"
-      when: "'Windows' in ansible_distribution"
+      when: 
+        - "'Windows' in ansible_distribution"
+        - chkcluster.failed == true
 
     - name: Retrieve SQL Server instance names from the registry
       win_shell: |

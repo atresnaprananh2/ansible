@@ -1,4 +1,4 @@
-- hosts: oracleRAC1
+- hosts: oraclesol
   gather_facts: yes
   name: System Discovery
   remote_user: root

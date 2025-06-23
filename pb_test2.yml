@@ -1,5 +1,5 @@
 - name: Get hostname of Linux servers
-  hosts: all
+  hosts: mysqlwin5
   gather_facts: yes
   tasks:
     - name: Show the hostname
