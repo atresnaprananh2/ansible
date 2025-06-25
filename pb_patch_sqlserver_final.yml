@@ -1,9 +1,8 @@
-- name: Patch Microsoft SQL Server 2019
+- name: Patch Microsoft SQL Server 
   hosts: all  # Replace with your actual Windows host group
   gather_facts: yes
   vars:
-    - dest: C:\Program Files\Opsware
-
+    dest: C:\Temp
   tasks:
    
     - name: Check if directory exists, if not create it
@@ -89,13 +88,39 @@
         state: absent
       when: "'Windows' in ansible_distribution"
 
+    - name: Retrieve SQL Server instance names from the registry
+      win_shell: |
+        Get-Item -Path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL" |
+        Select-Object -ExpandProperty Property
+      register: sql_instances
+      when: 
+        - "'Windows' in ansible_distribution"
+
+    - name: Display the SQL Server instance names
+      debug:
+        msg: "SQL Server Instance Names: {{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+        
+
+    - name: set instance
+      set_fact:
+        instancelist: "{{ sql_instances.stdout_lines }}"
+      when: 
+        - "'Windows' in ansible_distribution"
+    
     - name: Run the SQL Server patch installer silently
       win_shell: >
-        {{ dest }}\\{{ patchname }} /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
+        {{ dest }}\\{{ patchname }} /quiet /action=patch /IAcceptSQLServerLicenseTerms /allinstances /skiprules=RestartRequiredCheck
       args:
         executable: cmd
       ignore_errors: yes
       register: install_status
+
+    - name: Delete directory and its contents
+      ansible.windows.win_file:
+        path: "{{ dest }}"
+        state: absent
 
     - name: Check if reboot is required
       debug:
@@ -107,47 +132,4 @@
       win_reboot:
       when: install_status.rc == 3010
 
-    - name: Confirm reboot status
-      win_shell: "echo System reboot completed."
-      register: post_reboot_status
-      when: install_status.rc == 3010
-
-    - name: Delete Patch name
-      ansible.windows.win_file:
-        path: "{{ dest }}\\{{ patchname }}"
-        state: absent
-
-    # - name: Run SQL Server 2019 patch
-    #   win_command: |
-    #     C:\temp\sqlserver2019-kb5046365-x64.exe /quiet /action=patch /instancename=MSSQLSERVER /IAcceptSQLServerLicenseTerms
-    #   args:
-    #     creates: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log
-    #   ignore_errors: yes
-    #   register: checkinstallation
-
-    # - name: Check SQL Server patch installation log
-    #   win_stat:
-    #     path: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log
-    #   register: patch_log
-
-    # - name: Check if reboot is required
-    #   debug:
-    #     msg: >
-    #       Installation completed with return code {{ checkinstallation.rc }}.
-    #       A reboot is {{ 'required' if checkinstallation.rc == 3010 else 'not required' }}.
-
-    # - name: Reboot if required
-    #   win_reboot:
-    #   when: checkinstallation.rc == 3010
-
-    # - name: Confirm reboot status
-    #   win_shell: "echo System reboot completed."
-    #   register: post_reboot_status
-    #   when: install_status.rc == 3010
-
-    # - name: Verify patch installation was successful
-    #   win_shell: |
-    #     Get-Content -Path "C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\LOG\SQL_Patch_KB5046365.log" | Select-String -Pattern "successful"
-    #   # when: patch_log.stat.exists
-    #   register: patch_status
-    #   failed_when: patch_status.stdout | search("successful") == False
+   

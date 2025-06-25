@@ -127,6 +127,8 @@
           from pytwist.com.opsware.pkg import *
           from pytwist.com.opsware.search import Filter
           import json
+          import urllib.parse
+
 
           ts = twistserver.TwistServer()
           ts.authenticate("admin", "opsware_admin")
@@ -149,8 +151,9 @@
                       if server_vo.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}":
                           print(server_vo.mid)
                           for i in range(len(policy_vos.installableItemData)):
+                              encoded = urllib.parse.quote(f"pkg:///{policy_vos.installableItemData[i].policyItem.name}", safe='') + ".p5p"
                               package = {
-                                  "file_name": policy_vos.installableItemData[i].policyItem.name,
+                                  "file_name": encoded,
                                   "object_id": policy_vos.installableItemData[i].policyItem.id
                               }
                               packages.append(package)
@@ -196,25 +199,27 @@
             downloader.DownloadUnit({{ item.object_id }}, None, None, '{{ item.file_name }}', None, '/tmp/SRUPatch')
           )
       loop: "{{ patch_list }}"
-      loop_control:
-        label: "{{ item.file_name }}"
+      ignore_errors: yes
 
-      
-    - name: ensure all pkg are valid
-      ansible.builtin.command: pkgsend generate /tmp/SRUPatch | pkgfmt
-      register: chkoutput3
+    - name: Get list of package files
+      find:
+        paths: /tmp/SRUPatch
+        patterns: "*.p5p"
+      register: pkg_files
 
-    - name: chk val 3
-      debug:
-        var: chkoutput3.stdout
+    - name: Create manifest file with all pkg.fmri (fixed)
+      copy:
+        dest: /tmp/SRUPatchManifest.p5m
+        content: |
+          {% for item in pkg_files.files %}
+          {% set fmri = item.path | basename | urldecode | regex_replace('\\.p5p$', '', ignorecase=True) %}
+          set name=pkg.fmri value={{ fmri }}
+          {% endfor %}
 
-    - name: send pkg to srudir
-      ansible.builtin.command: pkgsend -s /IPS/repo/11.4.80/ publish -d /tmp/SRUPatch --batch
-      register: chkoutput4
-
-    - name: chk val 4
-      debug:
-        var: chkoutput4.stdout
+    - name: Publish manifest to repo
+      ansible.builtin.command: >
+        pkgsend publish -s /IPS/repo/11.4.80/ -d /tmp/SRUPatch /tmp/SRUPatchManifest.p5m
+      register: publish_result
 
     - name: refresh repo
       ansible.builtin.command: pkgrepo refresh -s /IPS/repo/11.4.80/

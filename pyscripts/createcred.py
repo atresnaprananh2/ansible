@@ -1,6 +1,9 @@
 import base64
 import getpass
 import subprocess
+from pytwist import * 
+from pytwist.com.opsware.search import Filter
+from pytwist.com.opsware.pkg import *
 
 # Function to encode text using Base64
 def encode_credentials(username, password):
@@ -27,36 +30,25 @@ store_credentials(encoded_credentials)
 command = [
     "/opt/opsware/software_import/oupload",
     "--pkgtype", "Unknown",
-    "--os", "Windows*",
-    "--folder", "/test",
-    "/root/cred.b64"
+    "--os", "UNIX",
+    "--folder", "/Package Repository/All Red Hat Linux",
+    "/opt/opsware/cred.b64"
 ]
 
 # Run the command
 try:
     result = subprocess.run(command, check=True, text=True, capture_output=True)
     print("Command executed successfully!")
+    ts = twistserver.TwistServer()
+    pkgsvc = ts.pkg.UnknownPkgService
+    filter2 = Filter()
+    packages = pkgsvc.findUnknownPkgRefs(filter2)
+    for package in packages2:
+        if package.name == "cred.b64":
+           print(package.name + " - " + str(package.id))
     print("Output:", result.stdout)
 
-    filter2 = Filter()
-    filter2.expression = 'name = "cred.b64"'
     
-    # Create a TwistServer object.
-    ts = twistserver.TwistServer()
-    
-    # Get a reference to ServerService.
-    packageService = ts.pkg.UnitService
-    
-    # Perform the search, returning a tuple of references.
-    packages = packageService.findUnitRefs(filter2)
-    
-    if len(packages) < 1:
-            print("No matching package found")
-            sys.exit(3)
-    
-    
-    for package in packages:
-        print(package.name + " - " + str(package.id))
 except subprocess.CalledProcessError as e:
     print("Error executing command:", e)
     print("Error Output:", e.stderr)

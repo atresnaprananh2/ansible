@@ -1,6 +1,9 @@
 - name: Patch MySQL RHEL
-  hosts: all 
+  hosts: mysqlrhel8 
   gather_facts: yes
+  become: true
+  remote_user: root
+  become_user: root
   vars:   
     #change the patch information if needed
     - mysql_installation_2: {}

@@ -124,6 +124,70 @@
       set_fact:
         main_node: ansible_facts.hostname
 
+    - name: get credential fileid
+      run_once: true
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist import * 
+          from pytwist.com.opsware.search import Filter
+          from pytwist.com.opsware.pkg import *
+          ts = twistserver.TwistServer()
+          pkgsvc = ts.pkg.UnknownPkgService
+          filter2 = Filter()
+          packages = pkgsvc.findUnknownPkgRefs(filter2)
+          for package in packages:
+              if package.name == "cred.b64":
+                print(package.id)
+      register: pkgname
+
+    - name: chk pkgname
+      debug:
+        var: pkgname.stdout
+    
+    - name: download credentials
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ pkgname.stdout }},None,None,'cred.b64', None, '/opt/opsware'))
+      register: test
+      when: "'RedHat' in ansible_distribution"   
+      tags: download,remote
+
+    - name: decode username
+      run_once: true
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          import base64
+
+          # Read from the .b64 file
+          with open("/opt/opsware/cred.b64", "r") as file:
+              encoded = file.read().strip()
+
+          # Decode Base64
+          decoded = base64.b64decode(encoded).decode('utf-8')
+
+          # Split into username and password
+          username, password = decoded.split(":", 1)  # The 1 ensures only the first ":" is used
+
+          print(decoded)
+
+      register: credentials
+    
+    - name: chk pkgname
+      debug:
+        var: credentials.stdout
+
+    - name: Split username and password
+      set_fact:
+        sa_username: "{{ credentials.stdout.split(':')[0] }}"
+        sa_password: "{{ credentials.stdout.split(':')[1] }}"
+
+   
+
     - name: Get secondary node MIDs as JSON list
       run_once: true
       shell: "{{ ansible_python_interpreter }} -"
@@ -135,7 +199,7 @@
           from pytwist import twistserver
 
           ts = twistserver.TwistServer()
-          ts.authenticate("admin", "nh2123")
+          ts.authenticate("{{ sa_username }}", "{{ sa_password }}")
 
           server_service = ts.server.ServerService
           servers = server_service.findServerRefs(Filter())
@@ -181,7 +245,7 @@
 
           # Authenticate to the TwistServer
           ts = twistserver.TwistServer()
-          ts.authenticate("admin", "nh2123")
+          ts.authenticate("{{ sa_username }}", "{{ sa_password }}")
 
           # Set up script execution arguments
           args = ServerScriptJobArgs()
@@ -467,6 +531,13 @@
     - name: "Final --- Remove the Ansible patching file"
       file:
         path: '/opt/opsware/{{ patchname }}'
+        state: absent
+      tags:
+        - final
+        - post
+    - name: "Final --- Remove the credential file"
+      file:
+        path: '/opt/opsware/cred.b64'
         state: absent
       tags:
         - final

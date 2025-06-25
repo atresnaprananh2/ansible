@@ -1,4 +1,4 @@
-- hosts: all
+- hosts: postgrewindows
   gather_facts: yes
   name: System Discovery
   vars:

@@ -1,4 +1,4 @@
-- hosts: rhel8001
+- hosts: mysqlrhel8
   gather_facts: yes
   name: System Discovery
   become: true
