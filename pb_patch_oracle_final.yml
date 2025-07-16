@@ -1,6 +1,7 @@
 - hosts: all
   gather_facts: true
-  name: Oracle Patching started...
+  name: Oracle Patching started..
+  
   vars:
     - isupdateopatch: "N"
     - readmecontent: ""
@@ -458,6 +459,17 @@
       when: "'RedHat' in ansible_distribution"
 
 
+   
+
+    - name: Step 29 --- Run datapatch after Oracle restart
+      command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; $ORACLE_HOME/OPatch/datapatch -verbose'
+      register: datapatch_output
+
+    - name: Step 30 --- Show datapatch output
+      debug:
+        var: datapatch_output.stdout_lines
+
+    
     - name: "Final --- Remove the Ansible patching directory"
       file:
         path: '{{ patchingdir }}/{{ patchcodes }}'

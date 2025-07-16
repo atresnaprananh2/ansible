@@ -11,6 +11,8 @@
     - oraclehomeinforhel: ""
     - oracle_home_sizesol: 0
     - oracle_home_sizerhel: 0
+    - checkconflict: "NA"
+    - checkgridanalyze: "NA"
 
   tasks:
     - name: Gather system facts
@@ -28,37 +30,36 @@
       when: "'Windows' in ansible_distribution"
 
     #linux script
-    
-    
+
     - name: Get Oracle PMON processes
       shell: ps -ef | grep ora_pmon | grep -v grep
       register: pmon_output
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Get Oracle PMON processes complete
       shell: ps -ef | grep pmon
       register: pmon_output2
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
     
     - name: Get Oracle User
       shell: ps -ef | grep ora_pmon | grep -v grep | awk '{print $1}' | uniq
       register: oracle_user
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
     - name: check patch
       debug:
         var: oracle_user
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
     
     - name:  Preparation - set variables user
       set_fact:
         orclusr: "{{ oracle_user.stdout }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name:  Preparation - set variables
       set_fact:
         isclustered: 'yes'
       when: 
-        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
         - "'+ASM' in pmon_output2.stdout"
 
     
@@ -68,7 +69,7 @@
       register: oraclehomeinforhel
       args:
         chdir: '/var/lib'
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Find the path oracle home  (Solaris)
       command: egrep '^[^#]' /var/opt/oracle/oratab
@@ -83,27 +84,27 @@
       register: oraclelastpatch
       args:
         chdir: '/var/lib'
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
 
     - name: Extract patch description
       set_fact:
         patchdesc: "{{ oraclelastpatch.stdout | regex_search('Patch description:  \"(.*?)\"', '\\1') }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
    
 
     - name: check patch
       set_fact:
         patch_description: "{{ patchdesc[0] }}" 
       when:  
-        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
         - patchdesc != ''
 
 
     - name: Display the extracted patch description
       debug:
         msg: "Extracted Patch Description: {{ patch_description }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
         
     - name: Set fact oratab (linux)
       set_fact:
@@ -111,7 +112,7 @@
         byteleft: "{{ ansible_mounts | selectattr('mount', '==', '/') | map(attribute='size_available') | first }}"
         osver: "{{ ansible_distribution }} ver {{ ansible_distribution_version }}" 
         patchloc: "/opt/opsware/Patching/"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     
     - name: Set fact oratab (sol)
@@ -126,14 +127,14 @@
         oraclehome: "{{ oraclehomeinforhel.stdout.split(':')[1] }}"
         instance: "{{ oraclehomeinforhel.stdout.split(':')[0] }}"
         autorun: "{{ oraclehomeinforhel.stdout.split(':')[2] }}"
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
 
     - name: Get Oracle Home directory size in GB (RHEL)
       ansible.builtin.shell: |
         du -sBG {{ oraclehome }} | cut -f1 | tr -d 'G'
       register: oracle_home_sizerhel
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Get Oracle Home directory size in GB (SOLARIS)
       ansible.builtin.shell: |
@@ -146,30 +147,30 @@
     - name: "Get Oracle Version"
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;sqlplus -v'
       register: oracleversion
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
     
     - name: check oracle version  (linux)
       debug:
         var:   " oracleversion.stdout_lines[1] | regex_replace('SQL\\*Plus: ', '') "
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
        
 
     - name: "Get Port"
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/bin/lsnrctl status' 
         # when: "oracle_binary_version | splitVersion == '12'"
       register: oracleport
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
 
     - name: "Get Opatch Version"
       command: sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;{{ oraclehome }}/OPatch/opatch version'
       register: opatchversion
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: check opatch version  (linux)
       debug:
         var: "opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '')"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
   
     - name: Set fact version (linux)
@@ -178,7 +179,7 @@
         opatchversion: "{{ opatchversion.stdout_lines[0] | regex_replace('OPatch Version: ', '') }}"
         oraport: "{{ oracleport.stdout | regex_findall('PORT=([0-9]+)', '\\1') }}"
         rootsize: "{{ byteleft | float * (1/1000000000)  }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Set orahome size Sol
       set_fact:
@@ -188,22 +189,22 @@
     - name: Set orahome size rhel
       set_fact:
         orahomesize: "{{ oracle_home_sizerhel.stdout }}"
-      when: "'RedHat' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Extract major Oracle version (12.2.0)
       set_fact:
         oracle_major_version: "{{ oracleversion | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Display major Oracle version
       debug:
         msg: "The Oracle major version is: {{ oracle_major_version }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
     
     - name: check port   (linux)
       debug:
         var: oraport[0]
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
       
     - name: Check ownership of known Oracle directories
       ansible.builtin.stat:
@@ -214,33 +215,33 @@
         - "/opt/oracle"
         - "/home/oracle"
       ignore_errors: yes
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Identify the user owning Oracle directories
       set_fact:
         oracle_os_user: "{{ oracle_dir_info.results | selectattr('stat.exists', 'equalto', true) | map(attribute='stat.pw_name') | first }}"
       when: 
         - oracle_dir_info.results | selectattr('stat.exists', 'equalto', true) | list | length > 0
-        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Check for running Oracle processes
       ansible.builtin.shell: "ps -eo user,comm | grep pmon | awk '{print $1}' | uniq"
       register: oracle_process_user
       ignore_errors: yes
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Set fact for Oracle process user if Oracle directories not found
       set_fact:
         oracle_os_user: "{{ oracle_process_user.stdout_lines[0] }}"
       when: 
         - oracle_os_user is not defined and oracle_process_user.stdout_lines | length > 0
-        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Search for Oracle environment variables in all users
       ansible.builtin.shell: "cat /etc/passwd | cut -d: -f1 | xargs -n 1 -I {} bash -c 'echo User: {} && sudo -u {} env | grep ORACLE_HOME' | grep User"
       register: oracle_env_user
       ignore_errors: yes
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Set fact for Oracle environment user if not already found
       set_fact:
@@ -250,17 +251,17 @@
     - name: Display Oracle OS user
       debug:
         msg: "Oracle OS User: {{ oracle_os_user if oracle_os_user is defined else 'Oracle user not found' }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Run ps command and grep for tnslsnr
       shell: ps -ef | grep tnslsnr | grep -v grep
       register: ps_output
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Extract tnslsnr path
       shell: echo "{{ ps_output.stdout }}" | awk '{print $8}' | head -n 1
       register: tnslsnr_path
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Display tnslsnr executable path without newline
       debug:
@@ -270,17 +271,17 @@
           {% else %}
             tnslsnr executable not found.
           {% endif %}
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Extract listener name from process details
       set_fact:
         listener_name: "{{ ps_output.stdout | regex_search('tnslsnr\\s+([\\w.-]+)', '\\1') }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Display listener name
       debug:
         msg: "The Oracle listener name is: {{ listener_name }}"
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Push custom attributes to selected server
       shell: |
@@ -314,201 +315,1075 @@
       register: python_output
       args:
         chdir: '/opt/opsware/agent/bin'
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
     - name: Display Python script output
       debug:
         msg: "{{ python_output.stdout }}" 
-      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution"
-   
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
-
-   
-
-
-
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
     
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
 
-    # #Windows Host Script
-
-    # - name: Get PostgreSQL installation base directory from registry (windows)
-    #   win_reg_stat:
-    #     path: HKLM:\SOFTWARE\PostgreSQL\Installations
-    #   register: postgres_installations
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Get Global PostgreSQL (windows)
-    #   win_reg_stat:
-    #     path: HKLM:\SOFTWARE\PostgreSQL Global Development Group\PostgreSQL
-    #   register: postgresglobal
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: Check Postgre Installed Ver (windows)
-    #   debug:
-    #     msg: "PostgreSQL {{ postgresglobal.properties['Version']['value'] }}"   
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Get the first installation ID (windows)
-    #   set_fact:
-    #     installation_id: "{{ postgres_installations.sub_keys[0] }}"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Retrieve installation directory (windows)
-    #   win_reg_stat:
-    #     path: HKLM:\SOFTWARE\PostgreSQL\Installations\{{ installation_id }}
-    #   register: postgres_installation_dir2
-    #   when: "'Windows' in ansible_distribution"
-
-    
-    
-   
-    # - name: Set fact base dir (windows)
-    #   set_fact:
-    #     basedir: "{{ postgres_installation_dir2.properties['Base Directory']['value'] }}"
-    #     datadir: "{{ postgres_installation_dir2.properties['Data Directory']['value'] }}"
-    #     installedver: "{{ postgresglobal.properties['Version']['value'] }}"
-    #     CompleteVer: "{{ postgres_installation_dir2.properties['CLT_Version']['value'] }}"
-    #     serviceid: "{{ postgres_installation_dir2.properties['Service ID']['value'] }}"
-    #     superuser: "{{ postgres_installation_dir2.properties['Super User']['value'] }}"
-
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Execute SQL command to get PostgreSQL port
-    #   win_shell: |
-    #     $env:PGPASSWORD = "P@ssw0rdnh2"
-    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "SHOW port;" -t
-    #   become: yes
-    #   become_method: runas
-    #   become_user: postgres
-    #   register: postgres_port
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Display the PostgreSQL port
-    #   debug:
-    #     msg: "PostgreSQL is running on port: {{ postgres_port.stdout.strip() }}"
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Execute SQL command to get PostgreSQL port
-    #   win_shell: |
-    #     $env:PGPASSWORD = "P@ssw0rdnh2"
-    #     {{ basedir }}\bin\psql.exe -U postgres -d postgres -c "select pg_is_in_recovery();" -t
-    #   become: yes
-    #   become_method: runas
-    #   become_user: postgres
-    #   register: postgremode
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: Set mode (windows)
-    #   set_fact:
-    #     psqlmode: 'standalone'
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "postgremode.stdout != 't'" 
-
-    # - name: Set fact port  (windows)
-    #   set_fact:
-    #     portpsql: "{{ postgres_port.stdout.strip() }}"
-    #   when: "'Windows' in ansible_distribution"
+    - name: Show custattr
+      debug:
+        var: custattr
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
        
     
+    - name:  Preparation - set variables
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        patchname: "{{ custattr.oracle_patchname }}"
+        patchid: "{{ custattr.oracle_patchid }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+        
+
+
+    - name: Preparation - set patching dir
+      set_fact:
+        patchingdir: "/oraclepatch"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: Ensure /oraclepatch exists with 777 permissions and oracle:oinstall ownership
+      ansible.builtin.file:
+        path: "{{ patchingdir }}"
+        state: directory
+        recurse: yes
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0777'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '{{ patchingdir }}'))
+      register: test
+      tags: download,remote
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no" 
+    
+    - name: Prerequisite --- Extract base patch name 
+      set_fact:
+        patchcodes: "{{ patchname | regex_search('^p[0-9]+') }}"
+        patch_number: "{{ patchname | regex_search('p([0-9]+)', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: Prerequisite --- Check if directory exists, if not create it
+      ansible.builtin.file:
+        path: "{{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}"
+        state: directory
+        mode: '0755'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution" 
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: "unzip patch"
+      unarchive: 
+        src: '{{ patchingdir }}/{{ patchname }}'
+        dest: '{{ patchingdir }}/{{ patchcodes }}'
+        list_files: yes
+        owner: "{{ oracle_user.stdout }}"
+        remote_src: yes
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: get the check stat 
+      command:  sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile;$ORACLE_HOME/OPatch/opatch prereq CheckConflictAgainstOHWithDetail -phBaseDir {{ patchingdir }}/{{ patchcodes }}/{{ patch_number[0] }}' 
+      register: opatchcheck
+      args:
+        chdir: '/var/lib'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: Show result summary
+      debug:
+        var: opatchcheck
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: Set OPatch check result message
+      set_fact:
+        checkconflict: >-
+          {{
+            (opatchcheck.stdout_lines | select('search', 'checkConflictAgainstOHWithDetail') | list | first
+            if 'checkConflictAgainstOHWithDetail' in opatchcheck.stdout else
+            'OPatch output did not include expected result')
+          }}
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: Push conflict info
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'oracle_conflictstatus': '{{ checkconflict }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+
+    - name: "Final --- Remove the temp patch dir"
+      file:
+        path: '{{ patchingdir }}'
+        state: absent
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_patchname is defined
+        - custattr.oracle_patchid is defined
+        - isclustered == "no"
+      tags:
+        - final
+        - post
+
+    - name:  Preparation - set variables
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        gridpatchname: "{{ custattr.oracle_gridpatchname }}"
+        gridpatchid: "{{ custattr.oracle_gridpatchid }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: "get user grid"
+      shell: ps -eo user,args | grep -E "crsd\.bin|ocssd\.bin|evmd\.bin" | grep -v grep | awk '{print $1}' | sort | uniq | grep -v root 
+      register: usergrid
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Find grid home
+      command:  sudo -u {{ usergrid.stdout }} bash -c '. ~/.bash_profile;echo $ORACLE_HOME' 
+      register: gridhome
+      args:
+        chdir: '/var/lib'
+      when: "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+
+    - name: Preparation - set patching dir (cluster)
+      set_fact:
+        gridpatchingdir: "/oraclepatchgrid"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Ensure /oraclepatch exists with 777 permissions and oracle_usera:oinstall ownership
+      ansible.builtin.file:
+        path: "{{ gridpatchingdir }}"
+        state: directory
+        recurse: yes
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0755'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ gridpatchid }},None,None,'{{ gridpatchname }}', None, '{{ gridpatchingdir }}'))
+      register: test
+      tags: download,remote
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Prerequisite --- Extract base patch name 
+      set_fact:
+        gridpatchcodes: "{{ gridpatchname | regex_search('^p[0-9]+') }}"
+        gridpatch_number: "{{ gridpatchname | regex_search('p([0-9]+)', '\\1') }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Prerequisite --- Check if directory exists, if not create it
+      ansible.builtin.file:
+        path: "{{ gridpatchingdir }}/{{ gridpatchcodes }}/{{ gridpatch_number[0] }}"
+        state: directory
+        mode: '0755'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution" 
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: "unzip patch"
+      unarchive: 
+        src: '{{ gridpatchingdir }}/{{ gridpatchname }}'
+        dest: '{{ gridpatchingdir }}/{{ gridpatchcodes }}'
+        list_files: yes
+        owner: "{{ usergrid.stdout }}"
+        remote_src: yes
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Ensure ownership for patch directory
+      ansible.builtin.file:
+        path: "{{gridpatchingdir}}/{{ gridpatchcodes }}"
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        recurse: yes
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Ensure permissions for patch directory
+      ansible.builtin.file:
+        path: "{{gridpatchingdir}}/{{ gridpatchcodes }}"
+        mode: '0755'
+        recurse: yes
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Debug - show patchingdir
+      debug:
+        msg: "{{ gridpatchingdir }}/{{ gridpatchcodes }}/{{ gridpatch_number }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Debug - show gridhome
+      debug:
+        var: gridhome
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Get the list of RAC nodes
+      shell: |
+         su - {{ oracle_user.stdout }} -c "{{ gridhome.stdout }}/bin/olsnodes -n -i | awk '{print \$1}'"
+      register: node_lists
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Debug nodes detected
+      debug:
+        var: node_lists
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Parse the node list
+      set_fact:
+        rac_nodes: "{{ node_lists.stdout_lines }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Debug nodes detected
+      debug:
+        msg: "Nodes detected: {{ rac_nodes }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+
+    - name: get secondary node
+      set_fact:
+        secondarynode: "{{ rac_nodes | reject('equalto', ansible_facts.hostname) | list }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Show filtered list
+      debug:
+        var: secondarynode[0]
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+
+    - name: Extract the node name from the PowerShell output
+      set_fact:
+        main_node: ansible_facts.hostname
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: get credential fileid
+      run_once: true
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist import * 
+          from pytwist.com.opsware.search import Filter
+          from pytwist.com.opsware.pkg import *
+          ts = twistserver.TwistServer()
+          pkgsvc = ts.pkg.UnknownPkgService
+          filter2 = Filter()
+          packages = pkgsvc.findUnknownPkgRefs(filter2)
+          for package in packages:
+              if package.name == "cred.b64":
+                print(package.id)
+      register: pkgname
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: chk pkgname
+      debug:
+        var: pkgname.stdout
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: download credentials
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ pkgname.stdout }},None,None,'cred.b64', None, '/opt/opsware'))
+      register: test
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+      tags: download,remote
+
+    - name: decode username
+      run_once: true
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          import base64
+
+          # Read from the .b64 file
+          with open("/opt/opsware/cred.b64", "r") as file:
+              encoded = file.read().strip()
+
+          # Decode Base64
+          decoded = base64.b64decode(encoded).decode('utf-8')
+
+          # Split into username and password
+          username, password = decoded.split(":", 1)  # The 1 ensures only the first ":" is used
+
+          print(decoded)
+
+      register: credentials
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: chk pkgname
+      debug:
+        var: credentials.stdout
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Split username and password
+      set_fact:
+        sa_username: "{{ credentials.stdout.split(':')[0] }}"
+        sa_password: "{{ credentials.stdout.split(':')[1] }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Get secondary node MIDs as JSON list
+      run_once: true
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          import json
+          from pytwist import *
+          from pytwist.com.opsware.search import Filter
+          from pytwist import twistserver
+
+          ts = twistserver.TwistServer()
+          ts.authenticate("{{ sa_username }}", "{{ sa_password }}")
+
+          server_service = ts.server.ServerService
+          servers = server_service.findServerRefs(Filter())
+
+          secondary = {{ secondarynode | to_json }}
+          mids = []
+
+          for srv in servers:
+              server_vo = server_service.getServerVO(srv)
+              short_name = server_vo.name.split('.')[0]
+              if short_name in secondary:
+                  mids.append(server_vo.mid)
+
+          print(json.dumps(mids))
+      register: getsecondnodeid
+      changed_when: false
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+
+
+
+    - name:  Preparation - set device id attr
+      set_fact:
+        deviceid: "{{ getsecondnodeid.stdout | from_json }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Debug the active node output
+      debug:
+        var: deviceid
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Print each device ID
+      debug:
+        msg: "Device ID: {{ item }}"
+      loop: "{{ deviceid }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: RAC shut off listener and db
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
+
+          # Authenticate to the TwistServer
+          ts = twistserver.TwistServer()
+          ts.authenticate("{{ sa_username }}", "{{ sa_password }}")
+
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef({{ item }})]
+
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 7200    # Timeout after 2 hrs
+
+          userTag = "shut off db and listener"
+
+          # PowerShell script to create and execute the Python script
+          source = '''
+          
+          #shut off listener
+          su - {{ usergrid.stdout }} <<'EOGRIDSTOP'
+          # Stop listener
+          lsnrctl stop
+
+          EOGRIDSTOP
+
+           # shut off db
+          su - {{ oracle_user.stdout }} <<'EOORACLE'
+        
+
+          # Shut down DB instance
+          sqlplus / as sysdba <<EOSQL
+          shutdown immediate;
+          exit;
+          EOSQL
+
+
+
+          EOORACLE
+
+
+          '''
+
+          codeType = 'SH'  # Running a batch script that invokes PowerShell
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 7200 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                            
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
+
+                  # Check if the job has finished
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
+
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+                            
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
+
+              # Timeout condition
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
+
+              time.sleep(10)  # Wait before checking again
+      register: result
+      loop: "{{ deviceid }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: debug result
+      debug:
+        var: result
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: " Stop the named listeners"
+      command: sudo -u {{ usergrid.stdout }} bash -c '. ~/.bash_profile;lsnrctl stop'     
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+      tags:
+        - patching
+
+    - name:  Create shutdown script for Oracle
+      copy:
+        dest: /opt/opsware/stopDatabase.sh
+        content: |
+          sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba' << EOF
+          shutdown immediate;
+          exit
+          EOF
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0750'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Shutdown Oracle database 
+      command: sh '/opt/opsware/stopDatabase.sh'
+      register: chkrslt
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: delete shutdown script file
+      file:
+        path: /opt/opsware/stopDatabase.sh
+        state: absent
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: debug command
+      debug:
+        msg: "{{ gridhome.stdout }}/OPatch/opatchauto apply {{ gridpatchingdir }}/{{ gridpatchcodes }}/{{ gridpatch_number[0] }} -analyze -nonrolling"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Run opatchauto analyze
+      command: "{{ gridhome.stdout }}/OPatch/opatchauto apply {{ gridpatchingdir }}/{{ gridpatchcodes }}/{{ gridpatch_number[0] }} -analyze -nonrolling"
+      register: opatchauto_output
+      ignore_errors: true
+      args:
+        chdir: "{{ gridpatchingdir }}/{{ gridpatchcodes }}"
+      when:
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: RAC turn on listener and db
+      shell: "{{ ansible_python_interpreter }} -"
+      args:
+        stdin: |
+          from pytwist.com.opsware.job import JobRef
+          import time
+          from pytwist import twistserver
+          from pytwist.com.opsware.script import ServerScriptJobArgs
+          from pytwist.com.opsware.server import ServerRef
+
+          # Authenticate to the TwistServer
+          ts = twistserver.TwistServer()
+          ts.authenticate("{{ sa_username }}", "{{ sa_password }}")
+
+          # Set up script execution arguments
+          args = ServerScriptJobArgs()
+          args.targets = [ServerRef({{ item }})]
+
+          args.tailOutputSize = 10 * 1024  # Capture last 10 KB of output
+          args.timeOut = 7200    # Timeout after 2 hrs
+
+          userTag = "turn on db and listener"
+
+          # PowerShell script to create and execute the Python script
+          source = '''
+          
+          #turn on  listener
+          su - {{ usergrid.stdout }} <<'EOGRIDSTART'
+          # Stop listener
+          lsnrctl start
+
+          EOGRIDSTART
+
+          #turn on  listener
+          su - {{ oracle_user.stdout }} <<'EODBSTART'
+          # Start DB instance
+          sqlplus / as sysdba <<EOSQL
+          startup;
+          exit;
+          EOSQL
+
+          EODBSTART
+
+          '''
+
+          codeType = 'SH'  # Running a batch script that invokes PowerShell
+
+          # Execute the script via OpenText Server Automation
+          jobRef = ts.script.ServerScriptService.startAdhocServerScript(source, codeType, args, userTag, None, None)
+
+          print(f"Created job {jobRef.getId()}, waiting for completion...")
+
+          # Wait until the job completes
+          max_wait_time = 7200 
+          start_time = time.time()
+
+          while True:
+              try:
+                  job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                            
+                  if job_info is None:
+                      print(f"Failed to retrieve job info for {jobRef.getId()}. Exiting loop.")
+                      break
+
+                  # Check if the job has finished
+                  if job_info.status in [2, 3, 4, 6]:  # Completed, Failed, or Canceled
+                      print(f"Job {jobRef.getId()} finished with status: {job_info.status}")
+                      break
+
+                  print(f"Job {jobRef.getId()} is still running (status={job_info.status})...")
+                            
+              except Exception as e:
+                  print(f"Error retrieving job info: {e}")
+                  break
+
+              # Timeout condition
+              if time.time() - start_time > max_wait_time:
+                  print(f"Timeout reached while waiting for job {jobRef.getId()}. Exiting loop.")
+                  break
+
+              time.sleep(10)  # Wait before checking again
+      register: result
+      loop: "{{ deviceid }}"
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: "Start the named listeners which were stopped from the {{ oracle_binary_version }} home"
+      command: sudo -u {{ usergrid.stdout }} bash -c '. ~/.bash_profile;lsnrctl start'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no" 
+      tags:
+        - patching
+
+    - name: Create startup script for Oracle
+      copy:
+        dest: /opt/opsware/startDatabase.sh
+        content: |
+          sudo -u {{ oracle_user.stdout }} bash -c '. ~/.bash_profile; sqlplus / as sysdba' << EOF
+          startup;
+          exit
+          EOF
+        owner: "{{ oracle_user.stdout }}"
+        group: oinstall
+        mode: '0750'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: start Oracle database 
+      command: sh '/opt/opsware/startDatabase.sh'
+      register: chkrsltstart
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: delete startup script file
+      file:
+        path: /opt/opsware/startDatabase.sh
+        state: absent
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+
+
+    - name: Check if opatchauto was successful
+      set_fact:
+        opatchauto_success: "{{ opatchauto_output.rc == 0 }}"
+      when:
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Debug - Show raw analyzed patch IDs
+      debug:
+        var: opatchauto_output
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+
+    - name: Parse patch codes with status from opatchauto stdout_lines
+      set_fact:
+        analyzed_patch_ids: >-
+          {% set result = [] %}
+          {% set mode = '' %}
+          {% for line in opatchauto_output.stdout_lines %}
+            {% set line = line.strip() %}
+            {% if '==Following patches were SUCCESSFULLY analyzed to be applied' in line %}
+              {% set mode = 'APPLIED' %}
+            {% elif line.startswith('==') %}
+              {% set mode = '' %}
+            {% elif line.startswith('Patch:') and mode == 'APPLIED' %}
+              {% set patch_id = line.split('/')[-1] %}
+              {% if patch_id.isdigit() %}
+                {% set _ = result.append(patch_id) %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ result | join(';') }}
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    # - name: Set fact for analyzed patch IDs (on success only)
+    #   set_fact:
+    #     analyzed_patch_ids: >-
+    #       {{
+    #         opatchauto_output.stdout_lines
+    #         | select('search', '^Patch: /oraclepatch/.*/(\\d+)$')
+    #         | map('regex_search', '(\\d+)$')
+    #         | list
+    #         | join(';')
+    #       }}
+    #   when: 
+    #     - opatchauto_success
+    #     - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+    #     - custattr.oracle_gridpatchname is defined
+    #     - custattr.oracle_gridpatchid is defined
+    #     - isclustered != "no"
+
+    - name: Set fact for opatchauto error message (on failure)
+      set_fact:
+        opatchauto_error_message: >-
+          {{
+            (opatchauto_output.stderr_lines | default([])) + 
+            (opatchauto_output.stdout_lines | select('search', 'OPATCHAUTO|error|failed|FAILURE|EXCEPTION') | list)
+          }}
+      when: 
+        - not opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+  
+    - name: Debug - Show analyzed patch IDs
+      debug:
+        var: analyzed_patch_ids
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Debug - Show opatchauto failure details
+      debug:
+        var: opatchauto_error_message
+      when: 
+        - not opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: set error opatchauto
+      set_fact:
+        checkgridanalyze: "{{ opatchauto_error_message[0] }}"
+      when: 
+        - not opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: set analyzed patch ids
+      set_fact:
+        checkgridanalyze: "{{ analyzed_patch_ids }}"
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Push opatchauto info
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'oracle_opatchautoanalyze': '{{ checkgridanalyze }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: "Final --- Remove the temp patch dir"
+      file:
+        path: '{{ gridpatchingdir }}'
+        state: absent
+      when: 
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+      tags:
+        - final
+        - post
+
+
 
    
-    # - name: Check Version
-    #   win_shell: |
-    #       # Ensure PowerShell uses TLS 1.2
-    #       [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-    #       # Alternatively, use TLS 1.3 if supported
-    #       # [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls13
 
-    #       # Now run your Invoke-WebRequest command
-    #       $response = Invoke-WebRequest -Uri "https://www.postgresql.org/ftp/source/" -UseBasicParsing
+   
 
-    #       # Extract version numbers that match "v15.x.x"
-    #       $versions = $response.Content -split "`n" | ForEach-Object {
-    #           if ($_ -match 'v{{ installedver }}\.[0-9]+') {
-    #               $matches = [regex]::Match($_, 'v{{ installedver }}\.[0-9]+')
-    #               if ($matches.Success) {
-    #                   $matches.Value
-    #               }
-    #           }
-    #       }
 
-    #       # Sort the versions and select the latest one
-    #       $latest_version = $versions | Sort-Object | Select-Object -Last 1
-
-    #       # Display the latest version
-    #       $latest_version
-    #   register: latestver
-    #   when: "'Windows' in ansible_distribution"
-    
-    # - name: check latest version  (windows)
-    #   debug:
-    #     var: latestver.stdout[1:-2]
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Set updateflag
-    #   set_fact:
-    #     needupdates: y
-    #   when: 
-    #     - "'Windows' in ansible_distribution"
-    #     - "installedver != latestver.stdout[1:-2]"
-
-    # - name: Create a temporary Python script file
-    #   win_shell: |
-    #     $script = @"
-    #     import pytwist
-    #     from pytwist import * 
-    #     from pytwist.com.opsware.search import Filter
-    #     from pytwist import twistserver
-    #     from pytwist.com.opsware.server import ServerRef
-    #     import json
-    #     ts = pytwist.twistserver.TwistServer()
-    #     try:
-    #         ts.authenticate("aditya", "Nh2server!")
-    #         server_service = ts.server.ServerService
-    #         filter = Filter()
-    #         server_refs = server_service.findServerRefs(filter)
-    #         for server_ref in server_refs:
-    #             server_details = ts.server.ServerService.getServerVO(server_ref)
-    #             if server_details.primaryIP == "{{ ansible_facts.ip_addresses[1] }}" :
-    #                 try:
-    #                     server_details = ts.server.ServerService.getServerVO(server_ref)
-    #                     CAMap = {'Version':'{{ CompleteVer }}', 'datadir': '{{ datadir }}','databaseplatform': 'PostgreSQL', 'Home':'{{ basedir }}','os_user': '{{ superuser }}', 'port': '{{ portpsql }}', 'mode': '{{ psqlmode }}'}
-    #                     ts.server.ServerService.setCustAttrs(server_ref, CAMap)
-    #                     print("ok")
-    #                 except Exception as e:
-    #                     print(f"Error processing server {server_ref.getId()}: {e}")
-          
-    #     except Exception as e:
-    #         print(f"Failed to authenticate: {str(e)}")
-    #         exit(1)
-    #     "@
-    #     $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Execute the Python script
-    #   win_shell: |
-    #     cd "C:\Program Files\Opsware\agent\python3"
-    #     .\python C:\pushcustomattr.py
-    #   register: result
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Display the output
-    #   debug:
-    #     var: result.stdout
-    #   when: "'Windows' in ansible_distribution"
-
-    # - name: Remove the temporary Python script
-    #   win_file:
-    #     path: C:\pushcustomattr.py
-    #     state: absent
-    #   when: "'Windows' in ansible_distribution"
-  
 
     
-
-
-
 
     
