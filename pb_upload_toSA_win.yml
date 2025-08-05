@@ -1,0 +1,16 @@
+- hosts: all #change with all for SA
+  gather_facts: yes
+  name: upload a package to SA.
+ 
+  tasks:
+ 
+    - name: Find hidden files in a directory on Windows
+      win_shell: |
+        cmd.exe /c "dir C:\temp\ud_scanner\results /A:-D /B"
+      register: hidden_files
+
+    - name: Show hidden files
+      debug:
+        var: hidden_files.stdout_lines
+
+   

@@ -137,7 +137,7 @@
         stdin: |
           from pytwist import * 
           from pytwist.com.opsware.search import Filter
-          from pytwist.com.opsware.pkg import *
+          from pytwist.com.opsware.pkg import *3
           ts = twistserver.TwistServer()
           pkgsvc = ts.pkg.UnknownPkgService
           filter2 = Filter()

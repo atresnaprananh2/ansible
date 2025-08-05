@@ -134,6 +134,83 @@
       debug:
         msg: "secondary node: {{ passive_node }}"
 
+    - name: Create a temporary Python script file get credentials
+      win_shell: |
+        $script = @"
+          from pytwist import * 
+          from pytwist.com.opsware.search import Filter
+          from pytwist.com.opsware.pkg import *
+          ts = twistserver.TwistServer()
+          pkgsvc = ts.pkg.UnknownPkgService
+          filter2 = Filter()
+          packages = pkgsvc.findUnknownPkgRefs(filter2)
+          for package in packages:
+              if package.name == "cred.b64":
+                print(package.id)
+        "@
+        $script | Out-File -FilePath C:\getcredentials.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\getcredentials.py
+      register: pkgname
+      when: "'Windows' in ansible_distribution"
+
+    - name: Download credentials file
+      win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ pkgname.stdout }},None,None,'cred.b64', None, r'{{ dest }}'))
+        "@
+        $script | Out-File -FilePath C:\downloadfilecred.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\downloadfilecred.py
+      register: tst
+      when: "'Windows' in ansible_distribution"
+
+    - name: decode username
+      win_shell: |
+          import base64
+
+          # Read from the .b64 file
+          with open(r"C:\cred.b64", "r") as file:
+              encoded = file.read().strip()
+
+          # Decode Base64
+          decoded = base64.b64decode(encoded).decode('utf-8')
+
+          # Split into username and password
+          username, password = decoded.split(":", 1)  # The 1 ensures only the first ":" is used
+
+          print(decoded)
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the download file using Python script
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\decodeusername.py
+      register: credentials
+      when: "'Windows' in ansible_distribution"
+
+    - name: chk pkgname
+      debug:
+        var: credentials.stdout
+
+    - name: Split username and password
+      set_fact:
+        sa_username: "{{ credentials.stdout.split(':')[0] }}"
+        sa_password: "{{ credentials.stdout.split(':')[1] }}"
+
+
+
+
     - name: Create a temporary Python script file get secondary cluster device id
       win_shell: |
         $script = @"
@@ -147,7 +224,7 @@
 
         # Authenticate with OTSA
         ts = twistserver.TwistServer()
-        ts.authenticate("admin", "nh2123")  # Replace with actual OTSA credentials
+        ts.authenticate("{{ sa_username }}", "{{ sa_password }}")  # Replace with actual OTSA credentials
 
         server_service = ts.server.ServerService
         # script_service = ts.script.ServerScriptService
@@ -197,7 +274,7 @@
 
           # Authenticate to the TwistServer
           ts = twistserver.TwistServer()
-          ts.authenticate("admin", "nh2123")
+          ts.authenticate("{{ sa_username }}", "{{ sa_password }}")
 
           # Set up script execution arguments
           args = ServerScriptJobArgs()
@@ -345,4 +422,8 @@
     - name: Delete directory and its contents
       ansible.windows.win_file:
         path: "{{ dest }}"
+        state: absent
+    - name: Remove credential
+      win_file:
+        path: 'C:\cred.b64'
         state: absent

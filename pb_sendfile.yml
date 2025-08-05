@@ -1,4 +1,4 @@
-- hosts: oracleRAC2 #change with all for SA
+- hosts: oracleRAC1 #change with all for SA
   gather_facts: yes
   name: Download a package from SA.
   remote_user: root #remove when running on SA Client
@@ -8,8 +8,8 @@
     - fileurl: http://172.19.2.98/patches/postgresql-15.8-1-windows-x64.exe
     - dest: /var/lib
     - installername: "postgresql-15.8-1-windows-x64.exe"
-    - patchname: "p36916690_190000_Linux-x86-64.zip"
-    - patchid: 540880001
+    - patchname: "p37641958_190000_Linux-x86-64.zip"
+    - patchid: 541070001
     - opatchname: "p6880880_121010_Linux-x86-64.zip"
     - opatchid: 540570001
     - ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
@@ -23,25 +23,25 @@
     #     url: "{{ fileurl }}"
     #     dest: C:\{{ installername }}
 
-    # - name: Prerequisite --- download patch file
-    #   command: "{{ ansible_python_interpreter }}"
-    #   args:
-    #     stdin: >
-    #       from coglib import downloader;
-
-    #       downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '/opt/opsware'))
-    #   register: test
-      # when: "'RedHat' in ansible_distribution"   
-      # tags: download,remote
-
     - name: Prerequisite --- download patch file
       command: "{{ ansible_python_interpreter }}"
       args:
         stdin: >
           from coglib import downloader;
 
-          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ opatchid }},None,None,'{{ opatchname }}', None, '/opt/opsware'))
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ patchid }},None,None,'{{ patchname }}', None, '/opt/opsware'))
       register: test
       when: "'RedHat' in ansible_distribution"   
       tags: download,remote
+
+    # - name: Prerequisite --- download patch file
+    #   command: "{{ ansible_python_interpreter }}"
+    #   args:
+    #     stdin: >
+    #       from coglib import downloader;
+
+    #       downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ opatchid }},None,None,'{{ opatchname }}', None, '/opt/opsware'))
+    #   register: test
+    #   when: "'RedHat' in ansible_distribution"   
+    #   tags: download,remote
      

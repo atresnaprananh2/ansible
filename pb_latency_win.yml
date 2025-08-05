@@ -1,0 +1,78 @@
+- name: Check latency from a Windows host
+  hosts: all         # or any WinRM‑enabled host
+  gather_facts: yes
+  vars:
+    threshold_ms: 15
+    ipaddr: ""
+    isCluster: "NA"
+    target_ip: "172.17.40.33"
+  tasks:
+  
+    - name: Measure latency and exit with non-zero RC if it's too high
+      win_shell: |
+        $latencyResult = (Test-Connection -ComputerName "{{ target_ip }}" -Count 4 |
+                          Measure-Object -Property ResponseTime -Average).Average
+
+        if ($latencyResult -gt {{ threshold_ms }}) {
+          Write-Output "Current latency is $latencyResult ms - above {{ threshold_ms }} ms."
+          Exit 1
+        } else {
+          Write-Output "Current latency is $latencyResult ms - within limit."
+          Exit 0
+        }
+        
+      register: latency_check
+      ignore_errors: yes
+
+    - name: Show script output
+      debug:
+        var: latency_check.stdout_lines[0]
+
+    - name: Create a temporary Python script file (Windows)
+      win_shell: |
+        $script = @"
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                try:
+                    server_details = ts.server.ServerService.getServerVO(server_ref)
+                    CAMap = {'svr_latency':'{{  latency_check.stdout_lines[0] }}'}
+                    ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                    print("ok")
+                except Exception as e:
+                    print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)
+        "@
+        $script | Out-File -FilePath C:\pushcustomattr.py -Encoding UTF8
+      when: "'Windows' in ansible_distribution"
+ 
+    - name: Execute the Python script (Windows)
+      win_shell: |
+        cd "C:\Program Files\Opsware\agent\python3"
+        .\python C:\pushcustomattr.py
+      register: result
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the output (Windows)
+      debug:
+        var: result.stdout
+      when: "'Windows' in ansible_distribution"
+
+    - name: Remove the temporary Python script (Windows)
+      win_file:
+        path: C:\pushcustomattr.py
+        state: absent
+      when: "'Windows' in ansible_distribution"

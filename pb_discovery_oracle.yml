@@ -13,6 +13,7 @@
     - oracle_home_sizerhel: 0
     - checkconflict: "NA"
     - checkgridanalyze: "NA"
+    - checkskipped: "NA"
 
   tasks:
     - name: Gather system facts
@@ -1229,22 +1230,41 @@
     - name: Parse patch codes with status from opatchauto stdout_lines
       set_fact:
         analyzed_patch_ids: >-
-          {% set result = [] %}
-          {% set mode = '' %}
-          {% for line in opatchauto_output.stdout_lines %}
-            {% set line = line.strip() %}
-            {% if '==Following patches were SUCCESSFULLY analyzed to be applied' in line %}
-              {% set mode = 'APPLIED' %}
-            {% elif line.startswith('==') %}
-              {% set mode = '' %}
-            {% elif line.startswith('Patch:') and mode == 'APPLIED' %}
-              {% set patch_id = line.split('/')[-1] %}
-              {% if patch_id.isdigit() %}
-                {% set _ = result.append(patch_id) %}
-              {% endif %}
-            {% endif %}
-          {% endfor %}
-          {{ result | join(';') }}
+          {{
+            opatchauto_output.stdout_lines
+            | select('search', '^Patch: ')
+            | map('regex_search', '([0-9]+)$')
+            | select('string')
+            | list
+            | unique
+            | join(';')
+          }}
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+    
+    - name: Extract skipped patch IDs from opatchauto output
+      set_fact:
+        skipped_patch_ids: >-
+          {%- set mode = false -%}
+          {%- set result = [] -%}
+          {%- for line in opatchauto_output.stdout_lines -%}
+            {%- set line = line.strip() -%}
+            {%- if '==Following patches were SKIPPED:' in line -%}
+              {%- set mode = true -%}
+            {%- elif mode and '==Following patches were' in line -%}
+              {%- set mode = false -%}
+            {%- elif mode and line.startswith('Patch:') -%}
+              {%- set parts = line.split('/') -%}
+              {%- if parts | length > 0 and parts[-1].isdigit() -%}
+                {%- set _ = result.append(parts[-1]) -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ result | unique | join(';') }}
       when: 
         - opatchauto_success
         - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
@@ -1252,22 +1272,7 @@
         - custattr.oracle_gridpatchid is defined
         - isclustered != "no"
 
-    # - name: Set fact for analyzed patch IDs (on success only)
-    #   set_fact:
-    #     analyzed_patch_ids: >-
-    #       {{
-    #         opatchauto_output.stdout_lines
-    #         | select('search', '^Patch: /oraclepatch/.*/(\\d+)$')
-    #         | map('regex_search', '(\\d+)$')
-    #         | list
-    #         | join(';')
-    #       }}
-    #   when: 
-    #     - opatchauto_success
-    #     - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
-    #     - custattr.oracle_gridpatchname is defined
-    #     - custattr.oracle_gridpatchid is defined
-    #     - isclustered != "no"
+    
 
     - name: Set fact for opatchauto error message (on failure)
       set_fact:
@@ -1284,9 +1289,19 @@
         - isclustered != "no"
 
   
-    - name: Debug - Show analyzed patch IDs
+    - name: Debug - Show ready to install patch IDs
       debug:
         var: analyzed_patch_ids
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
+
+    - name: Debug - Show skipped patch IDs
+      debug:
+        var: skipped_patch_ids
       when: 
         - opatchauto_success
         - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
@@ -1323,6 +1338,16 @@
         - custattr.oracle_gridpatchname is defined
         - custattr.oracle_gridpatchid is defined
         - isclustered != "no"
+
+    - name: set analyzed patch ids
+      set_fact:
+        checkskipped: "{{ skipped_patch_ids }}"
+      when: 
+        - opatchauto_success
+        - "'RedHat' in ansible_distribution or 'Solaris' in ansible_distribution or 'OracleLinux' in ansible_distribution"
+        - custattr.oracle_gridpatchname is defined
+        - custattr.oracle_gridpatchid is defined
+        - isclustered != "no"
     
     - name: Push opatchauto info
       shell: |
@@ -1343,7 +1368,7 @@
                 if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
                     try:
                         server_details = ts.server.ServerService.getServerVO(server_ref)
-                        CAMap = {'oracle_opatchautoanalyze': '{{ checkgridanalyze }}'}
+                        CAMap = {'oracle_patchreadytoinstall': '{{ checkgridanalyze }}', 'oracle_patchskipped': '{{ checkskipped }}'}
                         ts.server.ServerService.setCustAttrs(server_ref, CAMap)
                         print("ok")
                     except Exception as e:

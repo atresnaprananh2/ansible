@@ -1,5 +1,5 @@
 - name: Configure SRU 80 IPS repository on Solaris
-  hosts: ipssvr
+  hosts: oraclesol
   gather_facts: true
   become: true
   remote_user: root
@@ -257,6 +257,16 @@
     - debug:
         var: pub_status.stdout_lines
 
+   
+
+    - name: update pkg
+      command: pkg update --be-name solarisSRU
+      register: pub_status
+
+    - name: update bs
+      command: /opt/opsware/agent/pylibs3/cog/bs_software
+      register: pub_status
+    
     - name: "Final --- Remove the temp patch dir"
       file:
         path: '/tmp/SRUPatch'
