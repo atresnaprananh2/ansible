@@ -1,0 +1,234 @@
+---
+- name: Create and Execute SA File Uploader on Windows Target
+  hosts: wintestsvr  # Your Windows host group
+  gather_facts: true
+
+  vars:
+    opsware_python_path: "C:/Program Files/Opsware/agent/python3/python.exe"
+    # Define all temp files here for consistency
+    get_cred_script_path: "C:/temp/getcredentials.py"
+    download_script_path: "C:/temp/downloadfilecred.py"
+    decode_script_path: "C:/temp/decodeusername.py"
+    main_upload_script_path: "C:/temp/sa_upload_script.py"
+    cred_file_path: "C:/cred.b64"
+
+  tasks:
+    - name: Create a temporary Python script file to get credentials
+      ansible.windows.win_shell: |
+        $script = @"
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist.com.opsware.pkg import *
+        ts = twistserver.TwistServer()
+        pkgsvc = ts.pkg.UnknownPkgService
+        filter2 = Filter()
+        packages = pkgsvc.findUnknownPkgRefs(filter2)
+        for package in packages:
+            if package.name == "cred.b64":
+              print(package.id)
+        "@
+        # THE FIX: Use -Encoding ASCII to prevent the BOM character that causes IndentationError
+        $script | Out-File -FilePath "{{ get_cred_script_path }}" -Encoding ASCII
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the 'get credentials' Python script
+      ansible.windows.win_shell: |
+        & "{{ opsware_python_path }}" "{{ get_cred_script_path }}"
+      register: pkgname
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Remove the temporary 'get credentials' script
+      ansible.windows.win_file:
+        path: "{{ get_cred_script_path }}"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+        
+    - name: Debug
+      debug:
+        var: pkgname.stdout_lines[0]
+
+    - name: Create the 'download credentials' Python script
+      ansible.windows.win_shell: |
+        $script = @"
+        from coglib import downloader;
+
+        downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ pkgname.stdout_lines[0] }},None,None,'cred.b64', None, r'{{ cred_file_path }}'))
+        "@
+        # THE FIX: Use -Encoding ASCII
+        $script | Out-File -FilePath "{{ download_script_path }}" -Encoding ASCII
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Execute the 'download credentials' Python script
+      ansible.windows.win_shell: |
+        & "{{ opsware_python_path }}" "{{ download_script_path }}"
+      register: tst
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Remove the temporary 'download credentials' script
+      ansible.windows.win_file:
+        path: "{{ download_script_path }}"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name: Create the 'decode credentials' Python script
+      ansible.windows.win_shell: |
+        $script = @"
+        import base64
+        # Read from the .b64 file
+        with open(r"{{ cred_file_path }}", "r") as file:
+            encoded = file.read().strip()
+        # Decode Base64
+        decoded = base64.b64decode(encoded).decode('utf-8')
+        print(decoded)
+        "@
+        # THE FIX: Use -Encoding ASCII
+        $script | Out-File -FilePath "{{ decode_script_path }}" -Encoding ASCII
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Execute the 'decode credentials' Python script
+      ansible.windows.win_shell: |
+        & "{{ opsware_python_path }}" "{{ decode_script_path }}"
+      register: credentials
+      when: "'Windows' in ansible_distribution"
+    
+    - name: Remove the temporary 'decode credentials' script
+      ansible.windows.win_file:
+        path: "{{ decode_script_path }}"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name: Split username and password from decoded string
+      ansible.builtin.set_fact:
+        sa_core_username: "{{ credentials.stdout.split(':')[0] }}"
+        sa_core_password: "{{ credentials.stdout.split(':')[1] }}"
+
+    - name: Create the main Python uploader script on the Windows target
+      ansible.windows.win_shell: |
+        $sa_user_ps = "{{ sa_core_username }}"
+        $sa_pass_ps = "{{ sa_core_password }}"
+
+        $script = @"
+        # Your full, working Python script goes here...
+        # (Copied from your previous working version)
+        import os
+        import time
+        import base64
+        import hashlib
+        from pytwist import twistserver
+        from pytwist.com.opsware.job import JobRef
+        from pytwist.com.opsware.script import ServerScriptJobArgs
+        from pytwist.com.opsware.server import ServerRef
+
+        xsf_dir = r'C:\temp\ud_scanner\results'
+        remote_dir = '/var/tmp'
+        sa_core_id = 10001
+        sa_user = '$sa_user_ps'
+        sa_pass = '$sa_pass_ps'
+
+        try:
+            ts = twistserver.TwistServer()
+            ts.authenticate(sa_user, sa_pass)
+            print("Successfully authenticated to the SA Core.")
+        except Exception as e:
+            print(f"Failed to authenticate. Aborting. Error: {e}")
+            exit(1)
+
+        for filename in os.listdir(xsf_dir):
+            if not filename.lower().endswith('.xsf'):
+                continue
+            print("=" * 60)
+            print(f"Starting process for file: {filename}")
+            local_path = os.path.join(xsf_dir, filename)
+            remote_path = f"{remote_dir}/{filename}"
+            transfer_successful = False
+            try:
+                print(f"\n--- STEP 1: Transferring '{filename}' ---")
+                with open(local_path, 'rb') as f:
+                    file_content = f.read()
+                encoded_content = base64.b64encode(file_content).decode('ascii')
+                transfer_source = f"echo '{encoded_content}' | base64 --decode > {remote_path}"
+                args = ServerScriptJobArgs()
+                args.targets = [ServerRef(sa_core_id)]
+                args.timeOut = 7200
+                jobRef = ts.script.ServerScriptService.startAdhocServerScript(transfer_source, 'SH', args, f"Transfer file: {filename}", None, None)
+                print(f"Created job {jobRef.getId()}, waiting for completion...")
+                max_wait_time = 7200 
+                start_time = time.time()
+                job_info = None
+                while True:
+                    try:
+                        job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                        if job_info is None: break
+                        if job_info.status in [2, 3, 4, 6]: break
+                    except Exception as e: break
+                    if time.time() - start_time > max_wait_time: job_info = None; break
+                    time.sleep(10)
+                if job_info and job_info.status == 6:
+                    print("SUCCESS: Transfer job finished with status 6.")
+                    transfer_successful = True
+                else:
+                    status = job_info.status if job_info else "Timed Out or Failed"
+                    raise Exception(f"Job FAILED. Expected status 6 but loop finished with status {status}.")
+            except Exception as e:
+                print(f"CRITICAL ERROR in STEP 1 (Transfer): {e}")
+                continue
+            if transfer_successful:
+                try:
+                    print(f"\n--- STEP 2: Processing '{filename}' on the SA Core ---")
+                    process_source = f'''
+        /opt/opsware/software_import/oupload --pkgtype "Unknown" --os "Windows*" --folder "/Package Repository/All Windows" {remote_path}
+        rm -f {remote_path}
+        '''
+                    args = ServerScriptJobArgs()
+                    args.targets = [ServerRef(sa_core_id)]
+                    args.timeOut = 7200
+                    jobRef = ts.script.ServerScriptService.startAdhocServerScript(process_source, 'SH', args, f"Process file: {filename}", None, None)
+                    print(f"Created job {jobRef.getId()}, waiting for completion...")
+                    max_wait_time = 7200 
+                    start_time = time.time()
+                    job_info = None
+                    while True:
+                        try:
+                            job_info = ts.job.JobService.getJobInfoVO(JobRef(jobRef.getId()))
+                            if job_info is None: break
+                            if job_info.status in [2, 3, 4, 6]: break
+                        except Exception as e: break
+                        if time.time() - start_time > max_wait_time: job_info = None; break
+                        time.sleep(10)
+                    if job_info and job_info.status == 6:
+                        print(f"SUCCESS: File '{filename}' has been processed and cleaned up.")
+                    else:
+                        status = job_info.status if job_info else "Timed Out or Failed"
+                        raise Exception(f"Processing Job FAILED. Expected status 6 but got {status}.")
+                except Exception as e:
+                    print(f"CRITICAL ERROR in STEP 2 (Processing): {e}")
+                    continue
+        print("=" * 60)
+        print("All files processed.")
+        "@
+        # THE FIX: Use -Encoding ASCII
+        $script | Out-File -FilePath "{{ main_upload_script_path }}" -Encoding ASCII
+      when: "'Windows' in ansible_distribution"
+
+    - name: Execute the main Python uploader script
+      ansible.windows.win_shell: |
+        & "{{ opsware_python_path }}" "{{ main_upload_script_path }}"
+      register: script_result
+      when: "'Windows' in ansible_distribution"
+
+    - name: Display the final script output
+      ansible.builtin.debug:
+        var: script_result.stdout_lines
+      when: "'Windows' in ansible_distribution"
+
+    - name: Clean up the main temporary script
+      ansible.windows.win_file:
+        path: "{{ main_upload_script_path }}"
+        state: absent
+      when: "'Windows' in ansible_distribution"
+
+    - name: Clean up the downloaded credential file
+      ansible.windows.win_file:
+        path: "{{ cred_file_path }}"
+        state: absent
+      when: "'Windows' in ansible_distribution"

@@ -1,0 +1,111 @@
+- hosts: jbosssvr
+  gather_facts: yes
+  name: System Discovery
+  become: true
+  remote_user: root
+  become_user: root
+  tasks:
+    - name: Gather system facts
+      ansible.builtin.setup:
+
+    - name: Display OS distribution and version (linux)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts['default_ipv4']['address'] }}"
+      when: "'Windows' not in ansible_distribution"
+    
+    - name: Display OS distribution and version (windows)
+      debug:
+        msg: "The OS distribution of {{ ansible_facts.hostname }} is {{ ansible_distribution }} ver {{ ansible_distribution_version }} and IP: {{ ansible_facts.ip_addresses[1] }}"
+      when: "'Windows' in ansible_distribution"
+
+    #linux script
+  
+    - name: Check jboss home
+      shell: "ps -ef | grep '[j]boss' | tr ' ' '\n' | grep -m1 '^-Djboss.home.dir=' | cut -d= -f2"
+      register: jbosshome
+      ignore_errors: yes
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: jbosshome.stdout
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Get jboss product info
+      shell: "{{ jbosshome.stdout }}/bin/jboss-cli.sh --connect command=':product-info'"
+      register: jbossprodinfo
+      ignore_errors: true
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: chk1
+      debug:
+        var: jbossprodinfo
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Convert CLI output to JSON
+      set_fact:
+        jboss_info_json: "{{ jbossprodinfo.stdout
+                             | regex_replace('=>', ':')
+                             | from_yaml }}"
+
+    - name: Display summary
+      debug:
+        var: jboss_info_json.result[0].summary
+
+    - name: Display product version
+      debug:
+        msg: "{{ jboss_info_json.result[0].summary['product-version'] }}"
+
+    - name: set variables
+      set_fact:
+        jboss_product_ver: "{{  jboss_info_json.result[0].summary['product-version']  }}"
+        jboss_home: "{{ jboss_info_json.result[0].summary['product-home'] }}"
+        jboss_community_identifier: "{{ jboss_info_json.result[0].summary['product-community-identifier'] }}"
+        identifier: "{{ jboss_info_json.result[0].summary['standalone-or-domain-identifier'] }}"
+        javahome: "{{ jboss_info_json.result[0].summary.jvm['java-home'] }}"
+        javaver: "{{ jboss_info_json.result[0].summary.jvm['java-version'] }}"
+        jvmver: "{{  jboss_info_json.result[0].summary.jvm['jvm-version'] }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Push custom attributes to selected server
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        server_details = ts.server.ServerService.getServerVO(server_ref)
+                        CAMap = {'jboss_version':'{{ jboss_product_ver }}', 'jboss_home':'{{ jboss_home }}', 'jboss_community_identifier':'{{ jboss_community_identifier }}', 'jboss_identifier':'{{ identifier }}', 'jboss_javahome':'{{ javahome }}', 'jboss_javaver':'{{ javaver }}', 'jboss_jvmver':'{{ jvmver }}'}
+                        ts.server.ServerService.setCustAttrs(server_ref, CAMap)
+                        print("ok")
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: python_output
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+
+    - name: Display Python script output
+      debug:
+        msg: "{{ python_output.stdout }}" 
+      when: "'RedHat' in ansible_distribution"
+
+    
+
+      

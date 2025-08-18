@@ -1,0 +1,205 @@
+---
+- name: Starting Jboss Patch...
+  hosts: jbosssvr
+  become: true
+  remote_user: root #remove when running on SA Client
+  become: true #remove when running on SA Client
+  become_user: root #remove when running on SA Client
+  vars:
+    backup_dir: "/opt/jboss_backup_{{ ansible_date_time.iso8601_basic }}"
+
+  tasks:
+    - name: Preparation - Get Software Policy Attr
+      shell: |
+        ./python3 - << 'EOF'
+        import pytwist
+        from pytwist import * 
+        from pytwist.com.opsware.search import Filter
+        from pytwist import twistserver
+        from pytwist.com.opsware.server import ServerRef
+        import json
+        ts = pytwist.twistserver.TwistServer()
+        try:
+            server_service = ts.server.ServerService
+            filter = Filter()
+            server_refs = server_service.findServerRefs(filter)
+            for server_ref in server_refs:
+                server_details = ts.server.ServerService.getServerVO(server_ref)
+                if server_details.primaryIP == "{{ ansible_facts['default_ipv4']['address'] }}" :
+                    try:
+                        print(ts.server.ServerService.getCustAttrs(server_ref, None, True) )
+                    except Exception as e:
+                        print(f"Error processing server {server_ref.getId()}: {e}")
+          
+        except Exception as e:
+            print(f"Failed to authenticate: {str(e)}")
+            exit(1)  
+        EOF
+      register: instattr
+      args:
+        chdir: '/opt/opsware/agent/bin'
+      when: "'RedHat' in ansible_distribution"
+    
+    - name:  Preparation - setcustattr
+      set_fact:
+        custattr: "{{ instattr.stdout }}"
+      when: "'RedHat' in ansible_distribution"
+
+    - name:  Preparation - set variables 1
+      set_fact:
+        ansible_python_interpreter: "/opt/opsware/agent/bin/python3"
+        jboss_patchname: "{{ custattr.jboss_patchname }}"
+        jboss_patchid: "{{ custattr.jboss_patchid }}"
+      when: "'RedHat' in ansible_distribution"
+    
+    - name: Prerequisite --- download patch file
+      command: "{{ ansible_python_interpreter }}"
+      args:
+        stdin: >
+          from coglib import downloader;
+
+          downloader.Tsunami().fetch_unit(downloader.DownloadUnit({{ jboss_patchid }},None,None,'{{ jboss_patchname }}', None, '/opt/opsware'))
+      register: test
+      when: "'RedHat' in ansible_distribution"   
+      tags: download,remote
+
+
+    - name: Detect JBOSS_HOME from running process
+      shell: "ps -ef | grep '[j]boss' | tr ' ' '\n' | grep -m1 '^-Djboss.home.dir=' | cut -d= -f2"
+      register: jboss_home
+      changed_when: false
+    
+    - name: Set fact base dir (linux)
+      set_fact:
+        basedirlnx: "{{ jboss_home.stdout[:-3] }}"
+
+    - name: Fail if JBOSS_HOME not found
+      fail:
+        msg: "JBOSS_HOME could not be detected. Ensure JBoss is running."
+      when: jboss_home.stdout == ""
+
+    - name: Show detected JBOSS_HOME
+      debug:
+        msg: "JBOSS_HOME is {{ jboss_home.stdout }}"
+
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup configurations
+      copy:
+        src: "{{ jboss_home.stdout }}/standalone/configuration"
+        dest: "{{ backup_dir }}/configuration"
+        remote_src: true
+
+    - name: Backup deployments (WAR files)
+      copy:
+        src: "{{ jboss_home.stdout }}/standalone/deployments"
+        dest: "{{ backup_dir }}/deployments"
+        remote_src: true
+    
+    - name: Detect JBoss service name
+      shell: "systemctl list-unit-files | awk '/jboss/ {print $1}' | head -n1"
+      register: jboss_service_detect
+
+    - name: Set JBoss service fact
+      set_fact:
+        jboss_service: "{{ jboss_service_detect.stdout }}"
+
+    # ====== PATCHING SECTION WILL BE INSERTED HERE ======
+
+   
+    - name: Ensure temp extraction folder exists and is empty
+      file:
+        path: "{{ basedirlnx }}/jboss_patch_extract"
+        state: absent
+
+    - name: Create temp extraction folder
+      file:
+        path: "/{{ basedirlnx }}/jboss_patch_extract"
+        state: directory
+
+    - name: Extract JBoss patch ZIP
+      unarchive:
+        src: /opt/opsware/{{ jboss_patchname }}
+        dest: "{{ basedirlnx }}/jboss_patch_extract"
+        remote_src: yes
+
+    - name: Get extracted top-level directory
+      command: >
+        bash -c "ls -1 {{ basedirlnx }}/jboss_patch_extract | head -n 1"
+      register: extracted_dir
+      changed_when: false
+
+    - name: Set fact base dir (linux)
+      set_fact:
+        jbossdir: "{{ extracted_dir.stdout }}"
+
+
+    - name: Show extracted directory
+      debug:
+        msg: "Extracted directory is {{ jbossdir }}"
+
+    - name: stop svc
+      shell: "sudo systemctl stop {{ jboss_service }} || true"
+      changed_when: false
+
+    - name: Run JBoss EAP patch update
+      ansible.builtin.shell: |
+        {{ basedirlnx }}jboss_patch_extract/{{ jbossdir }}/bin/jboss-eap-installation-manager.sh \
+          update perform \
+          --dir={{ jboss_home.stdout }} \
+          -y
+      args:
+        chdir: "{{ basedirlnx }}"
+      register: patchrslt
+
+   
+    
+    
+        
+    - name: check patch result
+      debug:
+        var: patchrslt
+      when: "'RedHat' in ansible_distribution"
+
+    - name: start svc
+      shell: "sudo systemctl start {{ jboss_service }}"
+    
+    # - name: start svc 2
+    #   shell: "/opt/jboss/eap/bin/standalone.sh -b 0.0.0.0 &"
+
+    - name: Restore configurations
+      copy:
+        src: "{{ backup_dir }}/configuration/"
+        dest: "{{ jboss_home.stdout }}/standalone/configuration/"
+        remote_src: true
+        owner: jboss
+        group: jboss
+        mode: preserve
+
+    - name: Restore deployments (WAR files)
+      copy:
+        src: "{{ backup_dir }}/deployments/"
+        dest: "{{ jboss_home.stdout }}/standalone/deployments/"
+        remote_src: true
+        owner: jboss
+        group: jboss
+        mode: preserve
+
+    - name: Remove backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: absent
+        
+    - name: Remove patch directory 1
+      file:
+        path: "/opt/opsware/{{ jboss_patchid }}"
+        state: absent
+
+    - name: Remove patch directory 2
+      file:
+        path: "{{ basedirlnx}}jboss_patch_extract/{{ jbossdir }}"
+        state: absent
